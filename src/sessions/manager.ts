@@ -12,24 +12,32 @@ import type {
   CreateSessionInput,
   ExplorationEvent,
   ExplorationEventPayload,
+  ExplorationRun,
   ExplorationSession,
+  Framework,
+  ResumeSessionInput,
+  RunStatistics,
   SessionStatistics,
 } from "./types.js";
-import { CONTEXT_DOCUMENTS } from "./types.js";
+import {
+  CONTEXT_DOCUMENTS,
+  FRAMEWORK_LABELS,
+  IMPLEMENTED_FRAMEWORKS,
+} from "./types.js";
+import { frameworkFileName } from "../frameworks/index.js";
 
 interface ActiveRun {
   abortRequested: boolean;
+  paused: boolean;
+  runId: string;
 }
 
 export class SessionManager {
   private readonly store: SessionStore;
   private readonly bus = new EventEmitter();
   private readonly active = new Map<string, ActiveRun>();
-  /** In-memory sessions — source of truth while the process is alive. */
   private readonly sessionCache = new Map<string, ExplorationSession>();
-  /** In-memory events cache for live SSE (also persisted). */
   private readonly eventsCache = new Map<string, ExplorationEvent[]>();
-  /** Serialize event handling + session patches per session. */
   private readonly eventQueues = new Map<string, Promise<void>>();
   private eventSeq = 0;
 
@@ -48,7 +56,9 @@ export class SessionManager {
       if (!this.sessionCache.has(s.id)) this.sessionCache.set(s.id, s);
     }
     return [...this.sessionCache.values()].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt).getTime() -
+        new Date(a.updatedAt || a.createdAt).getTime(),
     );
   }
 
@@ -66,6 +76,10 @@ export class SessionManager {
     const events = await this.store.loadEvents(sessionId);
     this.eventsCache.set(sessionId, events);
     return events;
+  }
+
+  async listRuns(sessionId: string): Promise<ExplorationRun[]> {
+    return this.store.listRuns(sessionId);
   }
 
   onSessionEvent(
@@ -88,16 +102,32 @@ export class SessionManager {
       throw new Error("A valid application URL is required (include http:// or https://)");
     }
 
+    const framework = normalizeFramework(input.framework);
     const id = createSessionId();
     await this.store.ensureSession(id);
+    const now = new Date().toISOString();
+
+    const runId = await this.store.nextRunId(id);
+    const run: ExplorationRun = {
+      id: runId,
+      sessionId: id,
+      type: "initial",
+      startedAt: now,
+      status: "running",
+      statistics: emptyRunStats(),
+    };
+    await this.store.saveRun(run);
 
     const session: ExplorationSession = {
       id,
       applicationName: deriveApplicationName(url),
       applicationUrl: url,
       username: input.username?.trim() || undefined,
+      framework,
       status: "created",
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
+      currentExplorationId: runId,
       statistics: { pages: 0, elements: 0, actions: 0, flows: 0 },
       contextPath: this.store.contextDir(id),
       memoryPath: this.store.memoryDir(id),
@@ -109,8 +139,7 @@ export class SessionManager {
     await this.store.saveEvents(id, []);
     this.publishSession(session);
 
-    // Password stays in-process only — never written to session.json
-    void this.runExploration(session.id, {
+    void this.runExploration(session.id, runId, "initial", {
       url,
       username: input.username,
       password: input.password,
@@ -125,21 +154,79 @@ export class SessionManager {
     return session;
   }
 
-  async retrySession(sessionId: string, password?: string): Promise<ExplorationSession> {
+  /**
+   * Resume / re-explore an existing completed (or failed) session.
+   * Creates a new ExplorationRun inside the same session — does not create a new session.
+   */
+  async resumeExploration(
+    sessionId: string,
+    input: ResumeSessionInput = {},
+  ): Promise<ExplorationSession> {
     const existing = await this.getSession(sessionId);
     if (!existing) throw new Error("Session not found");
     if (this.active.has(sessionId)) throw new Error("Session is already running");
+    if (existing.status === "exploring" || existing.status === "re-exploring" || existing.status === "initializing") {
+      throw new Error("Session is already exploring");
+    }
 
-    return this.startExploration({
-      applicationUrl: existing.applicationUrl,
-      username: existing.username,
-      password,
-      headless: true,
+    const now = new Date().toISOString();
+    const runId = await this.store.nextRunId(sessionId);
+    const run: ExplorationRun = {
+      id: runId,
+      sessionId,
+      type: "resume",
+      startedAt: now,
+      status: "running",
+      statistics: emptyRunStats(),
+    };
+    await this.store.saveRun(run);
+
+    // Clear live event canvas for the new run (history remains in prior run files via change reports)
+    this.eventsCache.set(sessionId, []);
+    await this.store.saveEvents(sessionId, []);
+
+    const session = await this.updateSession(sessionId, {
+      status: "re-exploring",
+      currentExplorationId: runId,
+      error: undefined,
+      completedAt: undefined,
+      startedAt: now,
     });
+
+    void this.runExploration(sessionId, runId, "resume", {
+      url: existing.applicationUrl,
+      username: existing.username,
+      password: input.password,
+      headless: input.headless !== false,
+      maxPages: input.maxPages,
+      maxDepth: input.maxDepth,
+      maxDurationMs: input.maxDurationMs,
+    }).catch((err) => {
+      console.error(`[session ${sessionId}] resume runner failed:`, err);
+    });
+
+    return session;
+  }
+
+  async retrySession(sessionId: string, password?: string): Promise<ExplorationSession> {
+    return this.resumeExploration(sessionId, { password });
+  }
+
+  async stopExploration(sessionId: string): Promise<ExplorationSession> {
+    const active = this.active.get(sessionId);
+    if (!active) throw new Error("No active exploration to stop");
+    active.abortRequested = true;
+    return this.updateSession(sessionId, { status: "paused" });
+  }
+
+  async pauseExploration(sessionId: string): Promise<ExplorationSession> {
+    return this.stopExploration(sessionId);
   }
 
   private async runExploration(
     sessionId: string,
+    runId: string,
+    runType: "initial" | "resume",
     creds: {
       url: string;
       username?: string;
@@ -150,15 +237,19 @@ export class SessionManager {
       maxDurationMs?: number;
     },
   ): Promise<void> {
-    this.active.set(sessionId, { abortRequested: false });
+    this.active.set(sessionId, { abortRequested: false, paused: false, runId });
 
     let session = await this.requireSession(sessionId);
+    const statusOnStart = runType === "resume" ? "re-exploring" : "initializing";
     session = await this.updateSession(session.id, {
-      status: "initializing",
-      startedAt: new Date().toISOString(),
+      status: statusOnStart,
+      startedAt: session.startedAt ?? new Date().toISOString(),
       error: undefined,
       completedAt: undefined,
+      currentExplorationId: runId,
     });
+
+    const runs = await this.store.listRuns(sessionId);
 
     const options: ExploreOptions = {
       url: creds.url,
@@ -169,6 +260,12 @@ export class SessionManager {
       headless: creds.headless,
       json: true,
       verbose: false,
+      framework: session.framework,
+      applicationName: session.applicationName,
+      explorationRunId: runId,
+      explorationRuns: runs,
+      enableChangeDetection: runType === "resume",
+      shouldAbort: () => this.active.get(sessionId)?.abortRequested === true,
       boundaries: {
         ...DEFAULT_BOUNDARIES,
         maxPages: creds.maxPages ?? DEFAULT_BOUNDARIES.maxPages,
@@ -183,16 +280,39 @@ export class SessionManager {
     });
 
     try {
-      await this.updateSession(sessionId, { status: "exploring" });
+      if (runType === "initial") {
+        await this.updateSession(sessionId, { status: "exploring" });
+      }
+      // Re-explore always starts fresh crawl (change detection uses previous application.json)
       const result = await explorer.run(false);
-      // Wait for queued event handlers (incl. exploration_completed) before final status write
       await this.flushEventQueue(sessionId);
 
       const events = this.eventsCache.get(sessionId) ?? [];
+      const runStats: RunStatistics = result.runStatistics ?? {
+        ...emptyRunStats(),
+        pagesDiscovered: result.exploration.pagesDiscovered,
+        elementsDiscovered: result.exploration.elementsDiscovered,
+      };
+
+      const completedAt = new Date().toISOString();
+      await this.store.saveRun({
+        id: runId,
+        sessionId,
+        type: runType,
+        startedAt: session.startedAt ?? completedAt,
+        completedAt,
+        status: "completed",
+        statistics: runStats,
+        changeReportPath: result.changeReport
+          ? `changes/${runId}.md`
+          : undefined,
+      });
+
       await this.updateSession(sessionId, {
         status: "completed",
-        completedAt: new Date().toISOString(),
+        completedAt,
         error: undefined,
+        latestChanges: result.runStatistics,
         statistics: {
           pages: result.exploration.pagesDiscovered,
           elements: result.exploration.elementsDiscovered,
@@ -203,9 +323,21 @@ export class SessionManager {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.flushEventQueue(sessionId).catch(() => undefined);
+      const completedAt = new Date().toISOString();
+      await this.store
+        .saveRun({
+          id: runId,
+          sessionId,
+          type: runType,
+          startedAt: session.startedAt ?? completedAt,
+          completedAt,
+          status: "failed",
+          statistics: emptyRunStats(),
+        })
+        .catch(() => undefined);
       await this.updateSession(sessionId, {
         status: "failed",
-        completedAt: new Date().toISOString(),
+        completedAt,
         error: message,
       }).catch((updateErr) => {
         console.error(`[session ${sessionId}] failed to persist failure state:`, updateErr);
@@ -245,7 +377,6 @@ export class SessionManager {
     const list = this.eventsCache.get(sessionId) ?? (await this.store.loadEvents(sessionId));
     list.push(event);
     this.eventsCache.set(sessionId, list);
-    // Persist via store write queue (atomic); don't block the event chain on disk
     void this.store.saveEvents(sessionId, [...list]).catch(() => undefined);
 
     this.bus.emit(`event:${sessionId}`, event);
@@ -272,18 +403,9 @@ export class SessionManager {
     }
 
     if (payload.type === "browser_initialized" && payload.status === "running") {
-      patch.status = "initializing";
+      if (session.status !== "re-exploring") patch.status = "initializing";
     } else if (payload.type === "browser_initialized" && payload.status === "success") {
-      patch.status = "exploring";
-    } else if (payload.type === "exploration_completed") {
-      // Final completed write is owned by runExploration after flush;
-      // still refresh stats here for the live UI.
-      if (payload.statistics) {
-        patch.statistics = mergeStats(
-          this.sessionCache.get(sessionId)?.statistics ?? session.statistics,
-          payload.statistics,
-        );
-      }
+      if (session.status !== "re-exploring") patch.status = "exploring";
     } else if (payload.type === "exploration_failed") {
       patch.status = "failed";
       patch.error = payload.description;
@@ -310,13 +432,14 @@ export class SessionManager {
       ...current,
       ...patch,
       id: current.id,
+      updatedAt: new Date().toISOString(),
       statistics: patch.statistics
         ? { ...current.statistics, ...patch.statistics }
         : current.statistics,
     };
-    // Clear optional fields when explicitly set to undefined
     if ("error" in patch && patch.error === undefined) delete next.error;
     if ("completedAt" in patch && patch.completedAt === undefined) delete next.completedAt;
+    if ("latestChanges" in patch && patch.latestChanges === undefined) delete next.latestChanges;
 
     this.sessionCache.set(sessionId, next);
     await this.store.saveSession(next);
@@ -333,16 +456,48 @@ export class SessionManager {
       name: string;
       label: string;
       kind: "markdown" | "json";
+      description?: string;
       available: boolean;
+      size?: number;
     }>
   > {
+    const session = await this.getSession(sessionId);
     const docs = [];
     for (const doc of CONTEXT_DOCUMENTS) {
+      const available = await this.store.documentExists(sessionId, doc.name);
+      const size = available ? (await this.store.documentSize(sessionId, doc.name)) ?? undefined : undefined;
+      docs.push({ ...doc, available, size });
+    }
+
+    // Framework-specific doc
+    if (session && session.framework !== "independent") {
+      const name = `framework/${frameworkFileName(session.framework)}`;
+      const available = await this.store.documentExists(sessionId, name);
+      const size = available ? (await this.store.documentSize(sessionId, name)) ?? undefined : undefined;
       docs.push({
-        ...doc,
-        available: await this.store.documentExists(sessionId, doc.name),
+        name,
+        label: FRAMEWORK_LABELS[session.framework],
+        kind: "markdown" as const,
+        description: `${FRAMEWORK_LABELS[session.framework]} selector mappings`,
+        available,
+        size,
       });
     }
+
+    // Change reports
+    const changes = await this.store.listChangeReports(sessionId);
+    for (const name of changes) {
+      const size = (await this.store.documentSize(sessionId, name)) ?? undefined;
+      docs.push({
+        name,
+        label: path.basename(name),
+        kind: "markdown" as const,
+        description: "Exploration change report",
+        available: true,
+        size,
+      });
+    }
+
     return docs;
   }
 
@@ -384,6 +539,18 @@ function normalizeUrl(raw: string): string | null {
   }
 }
 
+function normalizeFramework(raw?: Framework | string): Framework {
+  if (!raw) return "independent";
+  if (IMPLEMENTED_FRAMEWORKS.includes(raw as Framework)) return raw as Framework;
+  // Accept labels that aren't implemented yet but store as independent for generation
+  const known = Object.keys(FRAMEWORK_LABELS) as Framework[];
+  if (known.includes(raw as Framework)) {
+    // Persist selection even if generator not ready — docs will omit framework file
+    return raw as Framework;
+  }
+  return "independent";
+}
+
 function mergeStats(
   current: SessionStatistics,
   patch: Partial<SessionStatistics>,
@@ -393,5 +560,19 @@ function mergeStats(
     elements: patch.elements ?? current.elements,
     actions: patch.actions ?? current.actions,
     flows: patch.flows ?? current.flows,
+  };
+}
+
+function emptyRunStats(): RunStatistics {
+  return {
+    pagesDiscovered: 0,
+    pagesAdded: 0,
+    pagesRemoved: 0,
+    elementsDiscovered: 0,
+    elementsAdded: 0,
+    elementsRemoved: 0,
+    selectorsChanged: 0,
+    flowsAdded: 0,
+    flowsChanged: 0,
   };
 }

@@ -13,22 +13,27 @@ import { extractFlows } from "../flows/index.js";
 import { ApplicationGraph } from "../graph/index.js";
 import { MemoryStore } from "../memory/index.js";
 import { buildApplicationContext, generateDocumentation } from "../documentation/index.js";
+import { detectChanges, type ChangeReport } from "../changes/index.js";
 import { toElementReference } from "../selectors/index.js";
 import { fingerprintState } from "../state/index.js";
 import type {
   Action,
+  ApplicationContext,
   Element,
   ExploreOptions,
   ExplorationMeta,
   Page,
 } from "../models/index.js";
-import { DEFAULT_TEST_DATA } from "../models/index.js";
-import type { ExplorationEventPayload } from "../sessions/types.js";
+import { DEFAULT_TEST_DATA, ApplicationContextSchema } from "../models/index.js";
+import type { ExplorationEventPayload, RunStatistics } from "../sessions/types.js";
+import { readFile } from "node:fs/promises";
 
 export interface ExploreResult {
   outputFiles: string[];
   exploration: ExplorationMeta;
   contextPath: string;
+  changeReport?: ChangeReport;
+  runStatistics?: RunStatistics;
 }
 
 export type ExplorationEventHandler = (event: ExplorationEventPayload) => void;
@@ -85,6 +90,81 @@ export class Explorer {
     };
   }
 
+  private emitChangeEvents(report: ChangeReport): void {
+    for (const p of report.newPages) {
+      this.emit({
+        type: "change_detected",
+        title: "New page discovered",
+        description: `+ ${p.url}`,
+        status: "new",
+        metadata: { kind: "page", change: "added", ...p },
+      });
+    }
+    for (const p of report.removedPages) {
+      this.emit({
+        type: "change_detected",
+        title: "Removed page detected",
+        description: `- ${p.url}`,
+        status: "removed",
+        metadata: { kind: "page", change: "removed", ...p },
+      });
+    }
+    for (const e of report.newElements.slice(0, 30)) {
+      this.emit({
+        type: "change_detected",
+        title: "New element discovered",
+        description: `+ "${e.name}"`,
+        status: "new",
+        metadata: { kind: "element", change: "added", ...e },
+      });
+    }
+    for (const e of report.removedElements.slice(0, 30)) {
+      this.emit({
+        type: "change_detected",
+        title: "Removed element detected",
+        description: `- "${e.name}"`,
+        status: "removed",
+        metadata: { kind: "element", change: "removed", ...e },
+      });
+    }
+    for (const c of report.changedSelectors) {
+      this.emit({
+        type: "change_detected",
+        title: "Selector changed",
+        description: `~ "${c.name}"`,
+        status: "changed",
+        metadata: { kind: "selector", change: "changed", ...c },
+      });
+    }
+    for (const f of report.newFlows) {
+      this.emit({
+        type: "change_detected",
+        title: "New flow discovered",
+        description: `+ "${f.name}"`,
+        status: "new",
+        metadata: { kind: "flow", change: "added", ...f },
+      });
+    }
+    for (const f of report.changedFlows) {
+      this.emit({
+        type: "change_detected",
+        title: "Flow changed",
+        description: `~ "${f.name}"`,
+        status: "changed",
+        metadata: { kind: "flow", change: "changed", ...f },
+      });
+    }
+    for (const u of report.unresolved) {
+      this.emit({
+        type: "change_detected",
+        title: "Unresolved Change",
+        description: u.detail,
+        status: "skipped",
+        metadata: { changeKind: u.kind, detail: u.detail },
+      });
+    }
+  }
+
   async run(resume = false): Promise<ExploreResult> {
     const startedAt = new Date().toISOString();
     const wallClockDeadline = Date.now() + this.options.boundaries.maxDurationMs;
@@ -100,6 +180,27 @@ export class Explorer {
       failedActions: 0,
     };
 
+    // Load previous application model for change detection (re-explore only)
+    let previousContext = this.options.previousContext;
+    if (this.options.enableChangeDetection && !previousContext) {
+      previousContext = await loadPreviousContext(this.options.output);
+    }
+
+    if (previousContext) {
+      this.emit({
+        type: "knowledge_loaded",
+        title: "Loaded previous knowledge",
+        description: `${previousContext.pages.length} existing pages`,
+        status: "existing",
+        metadata: {
+          pages: previousContext.pages.length,
+          elements: previousContext.elements.length,
+          flows: previousContext.flows.length,
+        },
+      });
+    }
+
+    // CLI "continue" resume: reload visited fingerprints and keep exploring
     if (resume) {
       const existing = await this.memory.load();
       if (existing) {
@@ -202,7 +303,7 @@ export class Explorer {
 
       const context = buildApplicationContext({
         application: {
-          name: deriveAppName(this.options.url),
+          name: this.options.applicationName ?? deriveAppName(this.options.url),
           baseUrl: this.options.url,
         },
         pages: this.graph.listPages(),
@@ -213,7 +314,33 @@ export class Explorer {
         exploration: meta,
       });
 
-      const outputFiles = await generateDocumentation(context, this.options.output);
+      let changeReport: ChangeReport | undefined;
+      let changeReportRelativePath: string | undefined;
+      let runStatistics: RunStatistics | undefined;
+
+      if (previousContext) {
+        changeReport = detectChanges(previousContext, context);
+        runStatistics = changeReport.summary;
+        const runId = this.options.explorationRunId ?? `exploration-${Date.now()}`;
+        changeReportRelativePath = `changes/${runId}.md`;
+        this.emitChangeEvents(changeReport);
+      }
+
+      const outputFiles = await generateDocumentation(context, this.options.output, {
+        framework: this.options.framework ?? "independent",
+        applicationName: this.options.applicationName ?? context.application.name,
+        applicationUrl: this.options.url,
+        status: "completed",
+        statistics: {
+          pages: meta.pagesDiscovered,
+          elements: meta.elementsDiscovered,
+          actions: this.actions.filter((a) => a.status === "EXECUTED").length,
+          flows: flows.length,
+        },
+        runs: this.options.explorationRuns ?? [],
+        changeReport,
+        changeReportRelativePath,
+      });
       await this.persist({ ...meta, flowsDiscovered: flows.length });
 
       this.emit({
@@ -227,6 +354,7 @@ export class Explorer {
           actions: this.actions.filter((a) => a.status === "EXECUTED").length,
           flows: flows.length,
         },
+        metadata: runStatistics ? { changes: runStatistics } : undefined,
       });
 
       this.logger.summary(meta, outputFiles);
@@ -234,6 +362,8 @@ export class Explorer {
         outputFiles,
         exploration: meta,
         contextPath: this.options.output,
+        changeReport,
+        runStatistics,
       };
     } catch (err) {
       meta = this.buildMeta(meta.startedAt, "failed");
@@ -259,6 +389,10 @@ export class Explorer {
   }): Promise<void> {
     const { boundaries } = this.options;
 
+    if (this.options.shouldAbort?.()) {
+      this.logger.log(`[BLOCKED] Exploration aborted by user`);
+      return;
+    }
     if (Date.now() > params.deadline) {
       this.logger.log(`[BLOCKED] Exploration time budget exceeded`);
       return;
@@ -953,6 +1087,16 @@ function deriveAppName(url: string): string {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
     return "application";
+  }
+}
+
+async function loadPreviousContext(outputDir: string): Promise<ApplicationContext | undefined> {
+  try {
+    const raw = await readFile(path.join(outputDir, "application.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    return ApplicationContextSchema.parse(parsed);
+  } catch {
+    return undefined;
   }
 }
 

@@ -88,7 +88,12 @@ describe("browser integration against demo app", () => {
     expect(raw).not.toContain('"secret"');
 
     const agents = await readFile(path.join(output, "AGENTS.md"), "utf8");
-    expect(agents).toContain("Read application.md");
+    expect(agents).toContain("CONTEXT.md");
+    expect(agents).toContain("application.json");
+
+    const contextMd = await readFile(path.join(output, "CONTEXT.md"), "utf8");
+    expect(contextMd).toContain("# Application Automation Context");
+    expect(contextMd).toContain("How to Use");
 
     // Selectors should prefer test ids where available
     const withTestId = (

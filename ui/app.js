@@ -1,89 +1,132 @@
 /** @typedef {import('../src/sessions/types.ts').ExplorationSession} ExplorationSession */
 /** @typedef {import('../src/sessions/types.ts').ExplorationEvent} ExplorationEvent */
 
+const FRAMEWORK_LABELS = {
+  independent: "Framework Independent",
+  playwright: "Playwright",
+  "selenium-java": "Selenium Java",
+  "selenium-javascript": "Selenium JavaScript",
+  cypress: "Cypress",
+  webdriverio: "WebdriverIO",
+};
+
+const FRAMEWORK_OPTIONS = [
+  { value: "independent", label: "Framework Independent", enabled: true },
+  { value: "playwright", label: "Playwright", enabled: true },
+  { value: "selenium-java", label: "Selenium Java", enabled: true },
+  { value: "selenium-javascript", label: "Selenium JavaScript", enabled: false },
+  { value: "cypress", label: "Cypress", enabled: false },
+  { value: "webdriverio", label: "WebdriverIO", enabled: false },
+];
+
+const FRAMEWORK_ICONS = {
+  independent: `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
+  playwright: `<svg viewBox="0 0 24 24"><path d="M4 7.5L12 3l8 4.5v9L12 21l-8-4.5v-9z"/><circle cx="12" cy="12" r="2.5"/></svg>`,
+  "selenium-java": `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(-60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="4"/></svg>`,
+  "selenium-javascript": `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(-60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="4"/></svg>`,
+  cypress: `<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 100 18 9 9 0 000-18z"/><path d="M8.5 12.5l2.2 2.2L15.5 10"/></svg>`,
+  webdriverio: `<svg viewBox="0 0 24 24"><path d="M4 16V8l8-4 8 4v8l-8 4-8-4z"/><path d="M12 8v8M8 10l4 2 4-2"/></svg>`,
+};
+
 const state = {
   sessions: /** @type {ExplorationSession[]} */ ([]),
   selectedId: /** @type {string | null} */ (null),
   events: /** @type {ExplorationEvent[]} */ ([]),
-  documents: /** @type {Array<{name:string;label:string;kind:string;available:boolean}>} */ ([]),
+  documents: /** @type {Array<{name:string;label:string;kind:string;description?:string;available:boolean;size?:number}>} */ ([]),
   sse: /** @type {EventSource | null} */ (null),
   autoScroll: true,
   durationTimer: /** @type {number | null} */ (null),
 };
 
+const $ = (id) => document.getElementById(id);
+
 const els = {
-  startForm: /** @type {HTMLFormElement} */ (document.getElementById("start-form")),
-  inputUrl: /** @type {HTMLInputElement} */ (document.getElementById("input-url")),
-  inputUsername: /** @type {HTMLInputElement} */ (document.getElementById("input-username")),
-  inputPassword: /** @type {HTMLInputElement} */ (document.getElementById("input-password")),
-  inputMaxPages: /** @type {HTMLInputElement} */ (document.getElementById("input-max-pages")),
-  inputMaxDuration: /** @type {HTMLInputElement} */ (document.getElementById("input-max-duration")),
-  formError: /** @type {HTMLElement} */ (document.getElementById("form-error")),
-  btnStart: /** @type {HTMLButtonElement} */ (document.getElementById("btn-start")),
-  btnTogglePassword: /** @type {HTMLButtonElement} */ (document.getElementById("btn-toggle-password")),
-  activeSessionCard: /** @type {HTMLElement} */ (document.getElementById("active-session-card")),
-  activeSessionName: /** @type {HTMLElement} */ (document.getElementById("active-session-name")),
-  activeSessionStatus: /** @type {HTMLElement} */ (document.getElementById("active-session-status")),
-  activeSessionStarted: /** @type {HTMLElement} */ (document.getElementById("active-session-started")),
-  activeSessionDuration: /** @type {HTMLElement} */ (document.getElementById("active-session-duration")),
-  btnViewActive: /** @type {HTMLButtonElement} */ (document.getElementById("btn-view-active")),
-  recentList: /** @type {HTMLElement} */ (document.getElementById("recent-list")),
-  recentEmpty: /** @type {HTMLElement} */ (document.getElementById("recent-empty")),
-  liveBadge: /** @type {HTMLElement} */ (document.getElementById("live-badge")),
-  toggleAutoscroll: /** @type {HTMLInputElement} */ (document.getElementById("toggle-autoscroll")),
-  btnClearCanvas: /** @type {HTMLButtonElement} */ (document.getElementById("btn-clear-canvas")),
-  progressLabel: /** @type {HTMLElement} */ (document.getElementById("progress-label")),
-  progressPct: /** @type {HTMLElement} */ (document.getElementById("progress-pct")),
-  progressTrack: /** @type {HTMLElement} */ (document.getElementById("progress-track")),
-  progressFill: /** @type {HTMLElement} */ (document.getElementById("progress-fill")),
-  statPages: /** @type {HTMLElement} */ (document.getElementById("stat-pages")),
-  statElements: /** @type {HTMLElement} */ (document.getElementById("stat-elements")),
-  statActions: /** @type {HTMLElement} */ (document.getElementById("stat-actions")),
-  statFlows: /** @type {HTMLElement} */ (document.getElementById("stat-flows")),
-  timeline: /** @type {HTMLOListElement} */ (document.getElementById("event-timeline")),
-  canvasEmpty: /** @type {HTMLElement} */ (document.getElementById("canvas-empty")),
-  canvasScroll: /** @type {HTMLElement} */ (document.getElementById("canvas-scroll")),
-  failedBanner: /** @type {HTMLElement} */ (document.getElementById("failed-banner")),
-  failedReason: /** @type {HTMLElement} */ (document.getElementById("failed-reason")),
-  btnRetry: /** @type {HTMLButtonElement} */ (document.getElementById("btn-retry")),
-  btnNewSession: /** @type {HTMLButtonElement} */ (document.getElementById("btn-new-session")),
-  contextName: /** @type {HTMLElement} */ (document.getElementById("context-name")),
-  contextUrl: /** @type {HTMLElement} */ (document.getElementById("context-url")),
-  contextStatusPill: /** @type {HTMLElement} */ (document.getElementById("context-status-pill")),
-  contextStarted: /** @type {HTMLElement} */ (document.getElementById("context-started")),
-  btnSessionMenu: /** @type {HTMLButtonElement} */ (document.getElementById("btn-session-menu")),
-  sessionMenu: /** @type {HTMLElement} */ (document.getElementById("session-menu")),
-  docList: /** @type {HTMLElement} */ (document.getElementById("doc-list")),
-  docsEmpty: /** @type {HTMLElement} */ (document.getElementById("docs-empty")),
-  btnDownloadAll: /** @type {HTMLButtonElement} */ (document.getElementById("btn-download-all")),
-  btnRemoveContext: /** @type {HTMLButtonElement} */ (document.getElementById("btn-remove-context")),
-  btnDeleteSession: /** @type {HTMLButtonElement} */ (document.getElementById("btn-delete-session")),
-  panelDocuments: /** @type {HTMLElement} */ (document.getElementById("panel-documents")),
-  panelOverview: /** @type {HTMLElement} */ (document.getElementById("panel-overview")),
-  tabDocuments: /** @type {HTMLButtonElement} */ (document.getElementById("tab-documents")),
-  tabOverview: /** @type {HTMLButtonElement} */ (document.getElementById("tab-overview")),
-  ovPages: /** @type {HTMLElement} */ (document.getElementById("ov-pages")),
-  ovElements: /** @type {HTMLElement} */ (document.getElementById("ov-elements")),
-  ovActions: /** @type {HTMLElement} */ (document.getElementById("ov-actions")),
-  ovFlows: /** @type {HTMLElement} */ (document.getElementById("ov-flows")),
-  ovStatus: /** @type {HTMLElement} */ (document.getElementById("ov-status")),
-  ovStarted: /** @type {HTMLElement} */ (document.getElementById("ov-started")),
-  ovCompleted: /** @type {HTMLElement} */ (document.getElementById("ov-completed")),
-  ovId: /** @type {HTMLElement} */ (document.getElementById("ov-id")),
-  allSessionList: /** @type {HTMLElement} */ (document.getElementById("all-session-list")),
-  btnViewAll: /** @type {HTMLButtonElement} */ (document.getElementById("btn-view-all")),
-  docModal: /** @type {HTMLElement} */ (document.getElementById("doc-modal")),
-  docModalTitle: /** @type {HTMLElement} */ (document.getElementById("doc-modal-title")),
-  docContent: /** @type {HTMLElement} */ (document.getElementById("doc-content")),
-  docCopy: /** @type {HTMLButtonElement} */ (document.getElementById("doc-copy")),
-  docClose: /** @type {HTMLButtonElement} */ (document.getElementById("doc-close")),
-  btnHelp: /** @type {HTMLButtonElement} */ (document.getElementById("btn-help")),
+  startForm: /** @type {HTMLFormElement} */ ($("start-form")),
+  inputUrl: /** @type {HTMLInputElement} */ ($("input-url")),
+  inputUsername: /** @type {HTMLInputElement} */ ($("input-username")),
+  inputPassword: /** @type {HTMLInputElement} */ ($("input-password")),
+  inputFramework: /** @type {HTMLInputElement} */ ($("input-framework")),
+  fwPicker: /** @type {HTMLElement} */ ($("fw-picker")),
+  fwTrigger: /** @type {HTMLButtonElement} */ ($("fw-trigger")),
+  fwTriggerIcon: /** @type {HTMLElement} */ ($("fw-trigger-icon")),
+  fwTriggerLabel: /** @type {HTMLElement} */ ($("fw-trigger-label")),
+  fwMenu: /** @type {HTMLElement} */ ($("fw-menu")),
+  inputMaxPages: /** @type {HTMLInputElement} */ ($("input-max-pages")),
+  inputMaxDuration: /** @type {HTMLInputElement} */ ($("input-max-duration")),
+  formError: /** @type {HTMLElement} */ ($("form-error")),
+  btnStart: /** @type {HTMLButtonElement} */ ($("btn-start")),
+  btnTogglePassword: /** @type {HTMLButtonElement} */ ($("btn-toggle-password")),
+  sessionList: /** @type {HTMLElement} */ ($("session-list")),
+  sessionsEmpty: /** @type {HTMLElement} */ ($("sessions-empty")),
+  btnViewAll: /** @type {HTMLButtonElement} */ ($("btn-view-all")),
+  canvasAppName: /** @type {HTMLElement} */ ($("canvas-app-name")),
+  canvasAppUrl: /** @type {HTMLElement} */ ($("canvas-app-url")),
+  canvasStatusPill: /** @type {HTMLElement} */ ($("canvas-status-pill")),
+  canvasFwPill: /** @type {HTMLElement} */ ($("canvas-fw-pill")),
+  btnPause: /** @type {HTMLButtonElement} */ ($("btn-pause")),
+  btnStop: /** @type {HTMLButtonElement} */ ($("btn-stop")),
+  liveBadge: /** @type {HTMLElement} */ ($("live-badge")),
+  toggleAutoscroll: /** @type {HTMLInputElement} */ ($("toggle-autoscroll")),
+  btnClearCanvas: /** @type {HTMLButtonElement} */ ($("btn-clear-canvas")),
+  progressLabel: /** @type {HTMLElement} */ ($("progress-label")),
+  progressPct: /** @type {HTMLElement} */ ($("progress-pct")),
+  progressTrack: /** @type {HTMLElement} */ ($("progress-track")),
+  progressFill: /** @type {HTMLElement} */ ($("progress-fill")),
+  statPages: /** @type {HTMLElement} */ ($("stat-pages")),
+  statElements: /** @type {HTMLElement} */ ($("stat-elements")),
+  statActions: /** @type {HTMLElement} */ ($("stat-actions")),
+  statFlows: /** @type {HTMLElement} */ ($("stat-flows")),
+  statEta: /** @type {HTMLElement} */ ($("stat-eta")),
+  timeline: /** @type {HTMLOListElement} */ ($("event-timeline")),
+  canvasEmpty: /** @type {HTMLElement} */ ($("canvas-empty")),
+  canvasScroll: /** @type {HTMLElement} */ ($("canvas-scroll")),
+  failedBanner: /** @type {HTMLElement} */ ($("failed-banner")),
+  failedReason: /** @type {HTMLElement} */ ($("failed-reason")),
+  btnRetry: /** @type {HTMLButtonElement} */ ($("btn-retry")),
+  contextName: /** @type {HTMLElement} */ ($("context-name")),
+  contextUrl: /** @type {HTMLElement} */ ($("context-url")),
+  contextStatusPill: /** @type {HTMLElement} */ ($("context-status-pill")),
+  contextMeta: /** @type {HTMLElement} */ ($("context-meta")),
+  contextFwPill: /** @type {HTMLElement} */ ($("context-fw-pill")),
+  btnResume: /** @type {HTMLButtonElement} */ ($("btn-resume")),
+  btnSessionMenu: /** @type {HTMLButtonElement} */ ($("btn-session-menu")),
+  sessionMenu: /** @type {HTMLElement} */ ($("session-menu")),
+  docList: /** @type {HTMLElement} */ ($("doc-list")),
+  docsEmpty: /** @type {HTMLElement} */ ($("docs-empty")),
+  btnDownloadAll: /** @type {HTMLButtonElement} */ ($("btn-download-all")),
+  btnDownloadZip: /** @type {HTMLButtonElement} */ ($("btn-download-zip")),
+  btnRemoveContext: /** @type {HTMLButtonElement} */ ($("btn-remove-context")),
+  btnDeleteSession: /** @type {HTMLButtonElement} */ ($("btn-delete-session")),
+  changeGrid: /** @type {HTMLElement} */ ($("change-grid")),
+  changesEmpty: /** @type {HTMLElement} */ ($("changes-empty")),
+  changeMiniGrid: /** @type {HTMLElement} */ ($("change-mini-grid")),
+  rightChangesEmpty: /** @type {HTMLElement} */ ($("right-changes-empty")),
+  ovPages: /** @type {HTMLElement} */ ($("ov-pages")),
+  ovElements: /** @type {HTMLElement} */ ($("ov-elements")),
+  ovActions: /** @type {HTMLElement} */ ($("ov-actions")),
+  ovFlows: /** @type {HTMLElement} */ ($("ov-flows")),
+  ovStatus: /** @type {HTMLElement} */ ($("ov-status")),
+  ovFramework: /** @type {HTMLElement} */ ($("ov-framework")),
+  ovStarted: /** @type {HTMLElement} */ ($("ov-started")),
+  ovCompleted: /** @type {HTMLElement} */ ($("ov-completed")),
+  ovId: /** @type {HTMLElement} */ ($("ov-id")),
+  setUrl: /** @type {HTMLElement} */ ($("set-url")),
+  setUser: /** @type {HTMLElement} */ ($("set-user")),
+  setFw: /** @type {HTMLElement} */ ($("set-fw")),
+  docModal: /** @type {HTMLElement} */ ($("doc-modal")),
+  docModalTitle: /** @type {HTMLElement} */ ($("doc-modal-title")),
+  docContent: /** @type {HTMLElement} */ ($("doc-content")),
+  docCopy: /** @type {HTMLButtonElement} */ ($("doc-copy")),
+  docClose: /** @type {HTMLButtonElement} */ ($("doc-close")),
+  btnHelp: /** @type {HTMLButtonElement} */ ($("btn-help")),
+  btnTheme: /** @type {HTMLButtonElement} */ ($("btn-theme")),
+  helpModal: /** @type {HTMLElement} */ ($("help-modal")),
+  helpClose: /** @type {HTMLButtonElement} */ ($("help-close")),
 };
 
 const ICONS = {
   view: `<svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>`,
   download: `<svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>`,
-  folder: `<svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>`,
   browser: `<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>`,
   nav: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18"/></svg>`,
   page: `<svg viewBox="0 0 24 24"><path d="M8 3h6l5 5v13a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v5h5"/></svg>`,
@@ -92,6 +135,7 @@ const ICONS = {
   flow: `<svg viewBox="0 0 24 24"><path d="M6 3v6M18 15v6M6 9a3 3 0 100 6 3 3 0 000-6zM18 9a3 3 0 100 6 3 3 0 000-6zM9 12h6"/></svg>`,
   check: `<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>`,
   fail: `<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  change: `<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0114.9-4M20 12a8 8 0 01-14.9 4M16 4v4h4M8 20v-4H4"/></svg>`,
 };
 
 async function api(path, options) {
@@ -109,7 +153,16 @@ function selectedSession() {
 }
 
 function isLive(status) {
-  return status === "created" || status === "initializing" || status === "exploring";
+  return (
+    status === "created" ||
+    status === "initializing" ||
+    status === "exploring" ||
+    status === "re-exploring"
+  );
+}
+
+function canResume(status) {
+  return status === "completed" || status === "failed" || status === "paused";
 }
 
 function formatTime(iso) {
@@ -138,6 +191,13 @@ function formatDate(iso) {
   }
 }
 
+function formatBytes(n) {
+  if (n == null) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function formatDuration(startedAt, endedAt) {
   if (!startedAt) return "—";
   const start = new Date(startedAt).getTime();
@@ -152,19 +212,114 @@ function formatDuration(startedAt, endedAt) {
 }
 
 function statusLabel(status) {
+  if (status === "re-exploring") return "Re-exploring";
   if (status === "exploring" || status === "initializing") return "Active";
   if (status === "completed") return "Completed";
   if (status === "failed") return "Failed";
+  if (status === "paused") return "Paused";
   return status;
 }
 
+function frameworkLabel(fw) {
+  return FRAMEWORK_LABELS[fw] || fw || "Framework Independent";
+}
+
+function frameworkIconHtml(fw) {
+  const svg = FRAMEWORK_ICONS[fw] || FRAMEWORK_ICONS.independent;
+  return `<span class="fw-icon fw-${fw}">${svg}</span>`;
+}
+
+function setFrameworkValue(value) {
+  const opt = FRAMEWORK_OPTIONS.find((o) => o.value === value) || FRAMEWORK_OPTIONS[0];
+  els.inputFramework.value = opt.value;
+  els.fwTriggerLabel.textContent = opt.label;
+  els.fwTriggerIcon.className = `fw-icon fw-${opt.value}`;
+  els.fwTriggerIcon.innerHTML = FRAMEWORK_ICONS[opt.value] || FRAMEWORK_ICONS.independent;
+  for (const btn of els.fwMenu.querySelectorAll(".fw-option")) {
+    btn.setAttribute("aria-selected", btn.dataset.value === opt.value ? "true" : "false");
+  }
+}
+
+function closeFrameworkMenu() {
+  els.fwPicker.classList.remove("open");
+  els.fwMenu.classList.add("hidden");
+  els.fwTrigger.setAttribute("aria-expanded", "false");
+}
+
+function openFrameworkMenu() {
+  els.fwPicker.classList.add("open");
+  els.fwMenu.classList.remove("hidden");
+  els.fwTrigger.setAttribute("aria-expanded", "true");
+}
+
+function toggleFrameworkMenu() {
+  if (els.fwMenu.classList.contains("hidden")) openFrameworkMenu();
+  else closeFrameworkMenu();
+}
+
+function initFrameworkPicker() {
+  els.fwMenu.innerHTML = "";
+  for (const opt of FRAMEWORK_OPTIONS) {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "fw-option";
+    btn.setAttribute("role", "option");
+    btn.dataset.value = opt.value;
+    btn.disabled = !opt.enabled;
+    btn.setAttribute("aria-selected", opt.value === els.inputFramework.value ? "true" : "false");
+    const label = document.createElement("span");
+    label.textContent = opt.label;
+    btn.innerHTML = frameworkIconHtml(opt.value);
+    btn.appendChild(label);
+    if (!opt.enabled) {
+      const soon = document.createElement("span");
+      soon.className = "fw-soon";
+      soon.textContent = "Soon";
+      btn.appendChild(soon);
+    }
+    btn.addEventListener("click", () => {
+      if (!opt.enabled) return;
+      setFrameworkValue(opt.value);
+      closeFrameworkMenu();
+    });
+    li.appendChild(btn);
+    els.fwMenu.appendChild(li);
+  }
+  setFrameworkValue(els.inputFramework.value || "independent");
+  els.fwTrigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFrameworkMenu();
+  });
+  document.addEventListener("click", (e) => {
+    if (!els.fwPicker.contains(/** @type {Node} */ (e.target))) closeFrameworkMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeFrameworkMenu();
+  });
+}
+
+function estimateProgress(session) {
+  if (!session) return 0;
+  if (session.status === "completed") return 100;
+  if (session.status === "failed") return 0;
+  const pages = session.statistics?.pages || 0;
+  // Soft estimate against default max pages of 50
+  return Math.min(95, Math.round((pages / 50) * 100));
+}
+
 function badgeForEvent(ev) {
+  if (ev.status === "new") return { text: "New", cls: "new" };
+  if (ev.status === "removed") return { text: "Removed", cls: "removed" };
+  if (ev.status === "changed") return { text: "Changed", cls: "changed" };
+  if (ev.status === "existing") return { text: "Existing", cls: "existing" };
   if (ev.type === "elements_discovered") {
     const count = ev.metadata?.count;
     return { text: count != null ? `${count} elements` : "Elements", cls: "info" };
   }
   if (ev.type === "page_discovered") return { text: "New Page", cls: "info" };
   if (ev.type === "flow_discovered") return { text: "Flow", cls: "info" };
+  if (ev.type === "change_detected") return { text: "Change", cls: "changed" };
   if (ev.status === "success") return { text: "Success", cls: "success" };
   if (ev.status === "failed") return { text: "Failed", cls: "failed" };
   if (ev.status === "skipped") return { text: "Skipped", cls: "skipped" };
@@ -172,6 +327,7 @@ function badgeForEvent(ev) {
 }
 
 function iconForEvent(ev) {
+  if (ev.type === "change_detected" || ev.type === "knowledge_loaded") return ICONS.change;
   if (ev.type.startsWith("browser")) return ICONS.browser;
   if (ev.type.startsWith("navigation")) return ICONS.nav;
   if (ev.type === "page_discovered") return ICONS.page;
@@ -195,86 +351,34 @@ function upsertSession(session) {
   else state.sessions.unshift(session);
   renderSessionLists();
   if (session.id === state.selectedId) renderSessionDetail(session);
-  renderActiveSessionCard();
 }
 
 function renderSessionLists() {
-  els.recentList.innerHTML = "";
-  els.allSessionList.innerHTML = "";
-
-  if (!state.sessions.length) {
-    els.recentEmpty.classList.remove("hidden");
-  } else {
-    els.recentEmpty.classList.add("hidden");
-  }
-
-  const recent = state.sessions.slice(0, 6);
-  for (const s of recent) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = `recent-item${s.id === state.selectedId ? " active" : ""}`;
-    btn.innerHTML = `<span class="name"></span><span class="sub"></span>`;
-    btn.querySelector(".name").textContent = s.applicationName;
-    const sub = btn.querySelector(".sub");
-    const pages = `${s.statistics.pages} pages`;
-    const date = formatDate(s.createdAt);
-    sub.innerHTML =
-      s.status === "completed"
-        ? `<span class="check">✓</span><span></span>`
-        : `<span></span>`;
-    sub.querySelector("span:last-child").textContent = `${date} · ${pages}`;
-    btn.addEventListener("click", () => selectSession(s.id));
-    els.recentList.appendChild(btn);
-  }
+  els.sessionList.innerHTML = "";
+  els.sessionsEmpty.classList.toggle("hidden", state.sessions.length > 0);
 
   for (const s of state.sessions) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = `all-session-item${s.id === state.selectedId ? " active" : ""}`;
-    btn.innerHTML = `<span class="folder">${ICONS.folder}</span><span class="info"><span class="name"></span><span class="sub"></span></span>`;
-    btn.querySelector(".name").textContent = s.applicationName;
-    btn.querySelector(".sub").textContent = `${statusLabel(s.status)} · ${s.statistics.pages} pages`;
+    btn.className = `session-item${s.id === state.selectedId ? " active" : ""}`;
+    const pct = estimateProgress(s);
+    const live = isLive(s.status);
+    btn.innerHTML = `
+      <div class="session-item-top">
+        <p class="session-item-name"></p>
+        <span class="status-pill ${live ? "live" : s.status}"></span>
+      </div>
+      <p class="session-item-url"></p>
+      <div class="session-item-stats"></div>
+      ${live ? `<div class="session-item-progress"><span style="width:${pct}%"></span></div>` : ""}
+    `;
+    btn.querySelector(".session-item-name").textContent = s.applicationName;
+    btn.querySelector(".status-pill").textContent = statusLabel(s.status);
+    btn.querySelector(".session-item-url").textContent = s.applicationUrl;
+    btn.querySelector(".session-item-stats").textContent =
+      `${s.statistics.pages} pages · ${s.statistics.elements} elements · ${s.statistics.flows} flows`;
     btn.addEventListener("click", () => selectSession(s.id));
-    els.allSessionList.appendChild(btn);
-  }
-}
-
-function renderActiveSessionCard() {
-  const live = state.sessions.find((s) => isLive(s.status));
-  if (!live) {
-    els.activeSessionCard.classList.add("hidden");
-    stopDurationTimer();
-    return;
-  }
-  els.activeSessionCard.classList.remove("hidden");
-  els.activeSessionName.textContent = live.applicationName;
-  els.activeSessionStatus.textContent =
-    live.status === "initializing" ? "Initializing browser…" : "Exploration in progress…";
-  els.activeSessionStarted.textContent = formatTime(live.startedAt || live.createdAt);
-  els.activeSessionDuration.textContent = formatDuration(live.startedAt || live.createdAt);
-  els.btnViewActive.onclick = () => selectSession(live.id);
-  startDurationTimer(live);
-}
-
-function startDurationTimer(session) {
-  stopDurationTimer();
-  state.durationTimer = window.setInterval(() => {
-    const current = state.sessions.find((s) => s.id === session.id);
-    if (!current || !isLive(current.status)) {
-      stopDurationTimer();
-      renderActiveSessionCard();
-      return;
-    }
-    els.activeSessionDuration.textContent = formatDuration(
-      current.startedAt || current.createdAt,
-    );
-  }, 1000);
-}
-
-function stopDurationTimer() {
-  if (state.durationTimer != null) {
-    clearInterval(state.durationTimer);
-    state.durationTimer = null;
+    els.sessionList.appendChild(btn);
   }
 }
 
@@ -286,11 +390,7 @@ function renderTimeline(events) {
     80;
 
   els.timeline.innerHTML = "";
-  if (!events.length) {
-    els.canvasEmpty.classList.remove("hidden");
-  } else {
-    els.canvasEmpty.classList.add("hidden");
-  }
+  els.canvasEmpty.classList.toggle("hidden", events.length > 0);
 
   for (const ev of events) {
     const badge = badgeForEvent(ev);
@@ -322,6 +422,40 @@ function renderTimeline(events) {
   }
 }
 
+function renderChanges(session) {
+  const c = session?.latestChanges;
+  const chips = [];
+  if (c) {
+    if (c.pagesAdded) chips.push({ cls: "add", text: `+ ${c.pagesAdded}`, sub: "New Pages" });
+    if (c.pagesRemoved) chips.push({ cls: "remove", text: `− ${c.pagesRemoved}`, sub: "Removed Pages" });
+    if (c.elementsAdded) chips.push({ cls: "add", text: `+ ${c.elementsAdded}`, sub: "New Elements" });
+    if (c.elementsRemoved) chips.push({ cls: "remove", text: `− ${c.elementsRemoved}`, sub: "Removed Elements" });
+    if (c.selectorsChanged) chips.push({ cls: "change", text: `~ ${c.selectorsChanged}`, sub: "Changed Selectors" });
+    if (c.flowsAdded) chips.push({ cls: "add", text: `+ ${c.flowsAdded}`, sub: "New Flows" });
+    if (c.flowsChanged) chips.push({ cls: "change", text: `~ ${c.flowsChanged}`, sub: "Changed Flows" });
+  }
+
+  const has = chips.length > 0;
+  els.changesEmpty.classList.toggle("hidden", has);
+  els.changeGrid.classList.toggle("hidden", !has);
+  els.rightChangesEmpty.classList.toggle("hidden", has);
+  els.changeMiniGrid.classList.toggle("hidden", !has);
+
+  const renderInto = (el) => {
+    el.innerHTML = "";
+    for (const chip of chips) {
+      const div = document.createElement("div");
+      div.className = `change-chip ${chip.cls}`;
+      div.innerHTML = `<span></span><small></small>`;
+      div.querySelector("span").textContent = chip.text;
+      div.querySelector("small").textContent = chip.sub;
+      el.appendChild(div);
+    }
+  };
+  renderInto(els.changeGrid);
+  renderInto(els.changeMiniGrid);
+}
+
 function renderStats(session) {
   const s = session?.statistics || { pages: 0, elements: 0, actions: 0, flows: 0 };
   els.statPages.textContent = String(s.pages);
@@ -339,38 +473,75 @@ function renderStats(session) {
     els.liveBadge.classList.add("hidden");
     els.progressTrack.hidden = true;
     els.progressPct.textContent = "";
+    els.statEta.textContent = "—";
     els.failedBanner.classList.add("hidden");
+    els.btnPause.classList.add("hidden");
+    els.btnStop.classList.add("hidden");
     return;
   }
 
-  if (isLive(session.status)) {
+  const live = isLive(session.status);
+  const pct = estimateProgress(session);
+
+  if (live) {
     els.progressLabel.textContent =
-      session.status === "initializing" ? "Initializing browser…" : "Exploration in progress";
+      session.status === "re-exploring"
+        ? "Re-exploring application…"
+        : session.status === "initializing"
+          ? "Initializing browser…"
+          : "Exploration in progress";
     els.liveBadge.classList.remove("hidden");
-    els.progressTrack.hidden = true;
-    els.progressPct.textContent = "";
+    els.progressTrack.hidden = false;
+    els.progressFill.style.width = `${pct}%`;
+    els.progressPct.textContent = `${pct}%`;
+    els.statEta.textContent = formatDuration(session.startedAt || session.createdAt);
+    els.btnPause.classList.remove("hidden");
+    els.btnStop.classList.remove("hidden");
   } else if (session.status === "completed") {
     els.progressLabel.textContent = "Exploration Completed";
     els.liveBadge.classList.add("hidden");
     els.progressTrack.hidden = false;
     els.progressFill.style.width = "100%";
     els.progressPct.textContent = "100%";
+    els.statEta.textContent = "00:00:00";
+    els.btnPause.classList.add("hidden");
+    els.btnStop.classList.add("hidden");
   } else if (session.status === "failed") {
     els.progressLabel.textContent = "Exploration Failed";
     els.liveBadge.classList.add("hidden");
     els.progressTrack.hidden = true;
     els.progressPct.textContent = "";
+    els.statEta.textContent = "—";
+    els.btnPause.classList.add("hidden");
+    els.btnStop.classList.add("hidden");
   } else {
     els.progressLabel.textContent = statusLabel(session.status);
     els.liveBadge.classList.add("hidden");
+    els.btnPause.classList.add("hidden");
+    els.btnStop.classList.add("hidden");
   }
 
+  els.failedBanner.classList.toggle("hidden", session.status !== "failed");
   if (session.status === "failed") {
-    els.failedBanner.classList.remove("hidden");
     els.failedReason.textContent = session.error || "Unknown error";
-  } else {
-    els.failedBanner.classList.add("hidden");
   }
+}
+
+function renderHeader(session) {
+  if (!session) {
+    els.canvasAppName.textContent = "Select a session";
+    els.canvasAppUrl.textContent = "Start a new exploration or pick a session";
+    els.canvasStatusPill.textContent = "—";
+    els.canvasStatusPill.className = "status-pill";
+    els.canvasFwPill.classList.add("hidden");
+    return;
+  }
+  els.canvasAppName.textContent = session.applicationName;
+  els.canvasAppUrl.textContent = session.applicationUrl;
+  els.canvasStatusPill.textContent = statusLabel(session.status).toUpperCase();
+  els.canvasStatusPill.className = `status-pill ${session.status}`;
+  els.canvasFwPill.textContent = frameworkLabel(session.framework);
+  els.canvasFwPill.classList.remove("hidden");
 }
 
 function renderContext(session, documents) {
@@ -379,38 +550,60 @@ function renderContext(session, documents) {
     els.contextUrl.textContent = "Select or start a session";
     els.contextStatusPill.textContent = "—";
     els.contextStatusPill.className = "status-pill";
-    els.contextStarted.textContent = "—";
+    els.contextMeta.textContent = "—";
+    els.contextFwPill.textContent = "Framework Independent";
+    els.btnResume.classList.add("hidden");
     els.docList.innerHTML = "";
     els.docsEmpty.classList.remove("hidden");
     els.btnDownloadAll.disabled = true;
+    els.btnDownloadZip.disabled = true;
     els.btnRemoveContext.disabled = true;
     els.btnDeleteSession.disabled = true;
     els.ovStatus.textContent = "—";
+    els.ovFramework.textContent = "—";
     els.ovStarted.textContent = "—";
     els.ovCompleted.textContent = "—";
     els.ovId.textContent = "—";
+    els.setUrl.textContent = "—";
+    els.setUser.textContent = "—";
+    els.setFw.textContent = "—";
     return;
   }
 
   els.contextName.textContent = session.applicationName;
   els.contextUrl.textContent = session.applicationUrl;
   els.contextStatusPill.textContent = statusLabel(session.status);
-  els.contextStatusPill.className = `status-pill${
-    isLive(session.status) ? " live" : session.status === "completed" ? " completed" : session.status === "failed" ? " failed" : ""
+  els.contextStatusPill.className = `status-pill ${
+    isLive(session.status)
+      ? "live"
+      : session.status === "completed"
+        ? "completed"
+        : session.status === "failed"
+          ? "failed"
+          : ""
   }`;
-  els.contextStarted.textContent = `Started ${formatDate(session.startedAt || session.createdAt)}`;
+  els.contextMeta.textContent = `Last explored ${formatDate(session.completedAt || session.updatedAt || session.createdAt)}`;
+  els.contextFwPill.textContent = frameworkLabel(session.framework);
+
+  const showResume = canResume(session.status);
+  els.btnResume.classList.toggle("hidden", !showResume);
 
   const availableCount = documents.filter((d) => d.available).length;
   const live = isLive(session.status);
   els.btnDownloadAll.disabled = availableCount === 0;
+  els.btnDownloadZip.disabled = availableCount === 0;
   els.btnRemoveContext.disabled = availableCount === 0 || live;
   els.btnDeleteSession.disabled = live;
   els.docsEmpty.classList.toggle("hidden", availableCount > 0);
 
   els.ovStatus.textContent = statusLabel(session.status);
+  els.ovFramework.textContent = frameworkLabel(session.framework);
   els.ovStarted.textContent = formatDate(session.startedAt || session.createdAt);
   els.ovCompleted.textContent = session.completedAt ? formatDate(session.completedAt) : "—";
   els.ovId.textContent = session.id;
+  els.setUrl.textContent = session.applicationUrl;
+  els.setUser.textContent = session.username || "—";
+  els.setFw.textContent = frameworkLabel(session.framework);
 
   els.docList.innerHTML = "";
   for (const doc of documents) {
@@ -419,11 +612,16 @@ function renderContext(session, documents) {
     const ext = doc.name.endsWith(".json") ? "JSON" : "MD";
     li.innerHTML = `
       <span class="doc-file-icon ${doc.kind === "json" ? "json" : ""}">${ext}</span>
-      <div class="doc-row-info"><span class="doc-name"></span><span class="doc-label"></span></div>
+      <div class="doc-row-info">
+        <span class="doc-name"></span>
+        <p class="doc-desc"></p>
+        <span class="doc-size"></span>
+      </div>
       <div class="doc-actions"></div>
     `;
     li.querySelector(".doc-name").textContent = doc.name;
-    li.querySelector(".doc-label").textContent = doc.label;
+    li.querySelector(".doc-desc").textContent = doc.description || doc.label;
+    li.querySelector(".doc-size").textContent = formatBytes(doc.size);
     const actions = li.querySelector(".doc-actions");
 
     const viewBtn = document.createElement("button");
@@ -440,7 +638,7 @@ function renderContext(session, documents) {
     downloadLink.innerHTML = ICONS.download;
     if (doc.available) {
       downloadLink.href = `/api/sessions/${encodeURIComponent(session.id)}/documents/${encodeURIComponent(doc.name)}?download=1`;
-      downloadLink.download = doc.name;
+      downloadLink.download = doc.name.split("/").pop() || doc.name;
     } else {
       downloadLink.addEventListener("click", (e) => e.preventDefault());
       downloadLink.style.pointerEvents = "none";
@@ -453,9 +651,11 @@ function renderContext(session, documents) {
 }
 
 function renderSessionDetail(session) {
+  renderHeader(session);
   renderStats(session);
   renderTimeline(state.events);
   renderContext(session, state.documents);
+  renderChanges(session);
 }
 
 async function openDocument(sessionId, name) {
@@ -509,7 +709,11 @@ function connectSse(sessionId) {
     if (data.session) upsertSession(data.session);
     state.events = data.events || [];
     renderTimeline(state.events);
-    if (data.session) renderStats(data.session);
+    if (data.session) {
+      renderStats(data.session);
+      renderHeader(data.session);
+      renderChanges(data.session);
+    }
     void refreshDocuments(sessionId);
   });
 
@@ -527,6 +731,8 @@ function connectSse(sessionId) {
     upsertSession(session);
     if (session.id === state.selectedId) {
       renderStats(session);
+      renderHeader(session);
+      renderChanges(session);
       if (session.status === "completed" || session.status === "failed") {
         void refreshDocuments(session.id);
       }
@@ -571,9 +777,10 @@ async function loadSessions() {
   const data = await api("/api/sessions");
   state.sessions = data.sessions || [];
   renderSessionLists();
-  renderActiveSessionCard();
   renderStats(null);
   renderContext(null, []);
+  renderHeader(null);
+  renderChanges(null);
   if (!state.sessions.length) return;
   const prefer = state.sessions.find((s) => isLive(s.status)) || state.sessions[0];
   await selectSession(prefer.id);
@@ -584,12 +791,24 @@ function closeMenu() {
   els.btnSessionMenu.setAttribute("aria-expanded", "false");
 }
 
-function setTab(tab) {
-  const docs = tab === "documents";
-  els.tabDocuments.classList.toggle("active", docs);
-  els.tabOverview.classList.toggle("active", !docs);
-  els.panelDocuments.classList.toggle("hidden", !docs);
-  els.panelOverview.classList.toggle("hidden", docs);
+function setCenterTab(tab) {
+  for (const id of ["live", "changes", "stats", "settings"]) {
+    const btn = document.getElementById(`ctab-${id}`);
+    const panel = document.getElementById(`panel-${id}`);
+    btn?.classList.toggle("active", id === tab);
+    panel?.classList.toggle("hidden", id !== tab);
+  }
+}
+
+function downloadAll() {
+  closeMenu();
+  if (!state.selectedId) return;
+  const a = document.createElement("a");
+  a.href = `/api/sessions/${encodeURIComponent(state.selectedId)}/documents/download-all`;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 els.startForm.addEventListener("submit", async (e) => {
@@ -609,6 +828,7 @@ els.startForm.addEventListener("submit", async (e) => {
       url,
       username: els.inputUsername.value.trim() || undefined,
       password: els.inputPassword.value || undefined,
+      framework: els.inputFramework.value || "independent",
       maxPages: Number(els.inputMaxPages.value) || undefined,
       maxDurationMs: Number(els.inputMaxDuration.value) || undefined,
     };
@@ -619,6 +839,7 @@ els.startForm.addEventListener("submit", async (e) => {
     els.inputPassword.value = "";
     upsertSession(session);
     await selectSession(session.id);
+    setCenterTab("live");
   } catch (err) {
     els.formError.textContent = err instanceof Error ? err.message : String(err);
     els.formError.classList.remove("hidden");
@@ -635,9 +856,8 @@ els.btnTogglePassword.addEventListener("click", () => {
   els.btnTogglePassword.title = show ? "Hide password" : "Show password";
 });
 
-els.btnNewSession.addEventListener("click", focusStartForm);
 els.btnViewAll.addEventListener("click", () => {
-  els.allSessionList.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  els.sessionList.scrollIntoView({ behavior: "smooth", block: "nearest" });
 });
 
 els.toggleAutoscroll.addEventListener("change", () => {
@@ -645,7 +865,6 @@ els.toggleAutoscroll.addEventListener("change", () => {
 });
 
 els.btnClearCanvas.addEventListener("click", () => {
-  // Visual clear only — persisted events remain for the session
   els.timeline.innerHTML = "";
   els.canvasEmpty.classList.remove("hidden");
 });
@@ -663,18 +882,56 @@ document.addEventListener("click", (e) => {
   }
 });
 
-els.tabDocuments.addEventListener("click", () => setTab("documents"));
-els.tabOverview.addEventListener("click", () => setTab("overview"));
+for (const id of ["live", "changes", "stats", "settings"]) {
+  document.getElementById(`ctab-${id}`)?.addEventListener("click", () => setCenterTab(id));
+}
 
-els.btnDownloadAll.addEventListener("click", () => {
-  closeMenu();
-  if (!state.selectedId || els.btnDownloadAll.disabled) return;
-  const a = document.createElement("a");
-  a.href = `/api/sessions/${encodeURIComponent(state.selectedId)}/documents/download-all`;
-  a.download = "";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+els.btnDownloadAll.addEventListener("click", downloadAll);
+els.btnDownloadZip.addEventListener("click", downloadAll);
+
+els.btnResume.addEventListener("click", async () => {
+  const session = selectedSession();
+  if (!session) return;
+  const password = session.username
+    ? window.prompt("Password (not stored; required only if the app needs login):") ?? undefined
+    : undefined;
+  try {
+    const { session: next } = await api(`/api/sessions/${encodeURIComponent(session.id)}/resume`, {
+      method: "POST",
+      body: JSON.stringify({ password: password || undefined }),
+    });
+    upsertSession(next);
+    await selectSession(next.id);
+    setCenterTab("live");
+  } catch (err) {
+    alert(err instanceof Error ? err.message : String(err));
+  }
+});
+
+els.btnPause.addEventListener("click", async () => {
+  if (!state.selectedId) return;
+  try {
+    const { session } = await api(`/api/sessions/${encodeURIComponent(state.selectedId)}/pause`, {
+      method: "POST",
+      body: "{}",
+    });
+    upsertSession(session);
+  } catch (err) {
+    alert(err instanceof Error ? err.message : String(err));
+  }
+});
+
+els.btnStop.addEventListener("click", async () => {
+  if (!state.selectedId) return;
+  try {
+    const { session } = await api(`/api/sessions/${encodeURIComponent(state.selectedId)}/stop`, {
+      method: "POST",
+      body: "{}",
+    });
+    upsertSession(session);
+  } catch (err) {
+    alert(err instanceof Error ? err.message : String(err));
+  }
 });
 
 els.btnRemoveContext.addEventListener("click", async () => {
@@ -719,12 +976,13 @@ els.btnDeleteSession.addEventListener("click", async () => {
     state.documents = [];
     state.selectedId = null;
     renderSessionLists();
-    renderActiveSessionCard();
     if (state.sessions.length) {
       await selectSession(state.sessions[0].id);
     } else {
       renderStats(null);
       renderContext(null, []);
+      renderHeader(null);
+      renderChanges(null);
       renderTimeline([]);
     }
   } catch (err) {
@@ -739,13 +997,10 @@ els.btnRetry.addEventListener("click", async () => {
     ? window.prompt("Password (not stored; required only if the app needs login):") ?? undefined
     : undefined;
   try {
-    const { session: next } = await api(
-      `/api/sessions/${encodeURIComponent(session.id)}/retry`,
-      {
-        method: "POST",
-        body: JSON.stringify({ password: password || undefined }),
-      },
-    );
+    const { session: next } = await api(`/api/sessions/${encodeURIComponent(session.id)}/resume`, {
+      method: "POST",
+      body: JSON.stringify({ password: password || undefined }),
+    });
     upsertSession(next);
     await selectSession(next.id);
   } catch (err) {
@@ -758,14 +1013,50 @@ els.docCopy.addEventListener("click", () => void copyDocument());
 els.docModal.addEventListener("click", (e) => {
   if (e.target === els.docModal) closeDocument();
 });
+
+function getTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  try {
+    localStorage.setItem("ae-theme", next);
+  } catch {
+    /* ignore */
+  }
+  const label = next === "dark" ? "Switch to light theme" : "Switch to dark theme";
+  els.btnTheme.title = label;
+  els.btnTheme.setAttribute("aria-label", label);
+}
+
+function toggleTheme() {
+  applyTheme(getTheme() === "dark" ? "light" : "dark");
+}
+
+applyTheme(getTheme());
+els.btnTheme.addEventListener("click", toggleTheme);
+
+function openHelp() {
+  els.helpModal.classList.remove("hidden");
+  els.helpClose.focus();
+}
+
+function closeHelp() {
+  els.helpModal.classList.add("hidden");
+}
+
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !els.docModal.classList.contains("hidden")) closeDocument();
+  if (e.key !== "Escape") return;
+  if (!els.docModal.classList.contains("hidden")) closeDocument();
+  else if (!els.helpModal.classList.contains("hidden")) closeHelp();
 });
 
-els.btnHelp.addEventListener("click", () => {
-  alert(
-    "Enter an application URL (optional credentials), then Start Exploring.\n\nWatch live activity in the canvas. Generated documents appear in Application Context when exploration finishes.",
-  );
+els.btnHelp.addEventListener("click", openHelp);
+els.helpClose.addEventListener("click", closeHelp);
+els.helpModal.addEventListener("click", (e) => {
+  if (e.target === els.helpModal) closeHelp();
 });
 
 loadSessions().catch((err) => {
@@ -773,3 +1064,5 @@ loadSessions().catch((err) => {
   els.formError.textContent = "Could not load sessions. Is the server running?";
   els.formError.classList.remove("hidden");
 });
+
+initFrameworkPicker();

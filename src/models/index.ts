@@ -216,6 +216,8 @@ export const DEFAULT_BOUNDARIES: ExplorationBoundaries = {
   excludedActions: [],
 };
 
+export type ExploreMode = "initial" | "reexplore" | "continue";
+
 export interface ExploreOptions {
   url: string;
   start?: string;
@@ -229,6 +231,19 @@ export interface ExploreOptions {
   verbose: boolean;
   boundaries: ExplorationBoundaries;
   testData: Record<string, string>;
+  /** Documentation / session metadata — does not affect exploration algorithm. */
+  framework?: import("../sessions/types.js").Framework;
+  applicationName?: string;
+  /** Prior application model for change detection (re-explore). */
+  previousContext?: ApplicationContext;
+  /** When true, compare against previous application.json and emit change events. */
+  enableChangeDetection?: boolean;
+  /** Run id used for change report naming. */
+  explorationRunId?: string;
+  /** Exploration history for CONTEXT.md. */
+  explorationRuns?: import("../sessions/types.js").ExplorationRun[];
+  /** Optional abort check polled during exploration. */
+  shouldAbort?: () => boolean;
 }
 
 export const DEFAULT_TEST_DATA: Record<string, string> = {

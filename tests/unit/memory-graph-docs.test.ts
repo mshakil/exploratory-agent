@@ -169,6 +169,7 @@ describe("documentation", () => {
     const files = await generateDocumentation(context, dir);
     expect(files.some((f) => f.endsWith("application.md"))).toBe(true);
     expect(files.some((f) => f.endsWith("AGENTS.md"))).toBe(true);
+    expect(files.some((f) => f.endsWith("CONTEXT.md"))).toBe(true);
 
     const json = JSON.parse(await readFile(path.join(dir, "application.json"), "utf8"));
     expect(json.schemaVersion).toBe("1.0");

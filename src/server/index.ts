@@ -92,6 +92,7 @@ async function handleRequest(
       url?: string;
       username?: string;
       password?: string;
+      framework?: string;
       headless?: boolean;
       maxPages?: number;
       maxDepth?: number;
@@ -108,6 +109,7 @@ async function handleRequest(
         applicationUrl: body.url,
         username: body.username,
         password: body.password,
+        framework: body.framework as import("../sessions/types.js").Framework | undefined,
         headless: body.headless !== false,
         maxPages: body.maxPages,
         maxDepth: body.maxDepth,
@@ -186,10 +188,10 @@ async function handleRequest(
       return;
     }
 
-    const docMatch = rest.match(/^\/documents\/([^/]+)$/);
-    if (docMatch && method === "GET") {
+    const docMatch = rest.match(/^\/documents\/(.+)$/);
+    if (docMatch && method === "GET" && !rest.includes("download-all")) {
       const name = decodeURIComponent(docMatch[1]!);
-      if (name.includes("..") || name.includes("/") || name.includes("\\")) {
+      if (name.includes("..") || name.startsWith("/") || name.startsWith("\\")) {
         json(res, 400, { error: "Invalid document name" });
         return;
       }
@@ -206,10 +208,57 @@ async function handleRequest(
       res.writeHead(200, {
         "Content-Type": contentType,
         ...(download
-          ? { "Content-Disposition": `attachment; filename="${name}"` }
+          ? { "Content-Disposition": `attachment; filename="${path.basename(name)}"` }
           : {}),
       });
       res.end(content);
+      return;
+    }
+
+    if (rest === "/runs" && method === "GET") {
+      const session = await manager.getSession(sessionId);
+      if (!session) {
+        json(res, 404, { error: "Session not found" });
+        return;
+      }
+      const runs = await manager.listRuns(sessionId);
+      json(res, 200, { runs });
+      return;
+    }
+
+    if (rest === "/resume" && method === "POST") {
+      const body = await readJsonBody<{
+        password?: string;
+        headless?: boolean;
+        maxPages?: number;
+        maxDurationMs?: number;
+      }>(req);
+      try {
+        const session = await manager.resumeExploration(sessionId, body);
+        json(res, 200, { session });
+      } catch (err) {
+        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    if (rest === "/stop" && method === "POST") {
+      try {
+        const session = await manager.stopExploration(sessionId);
+        json(res, 200, { session });
+      } catch (err) {
+        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    if (rest === "/pause" && method === "POST") {
+      try {
+        const session = await manager.pauseExploration(sessionId);
+        json(res, 200, { session });
+      } catch (err) {
+        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
       return;
     }
 

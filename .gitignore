@@ -7,6 +7,7 @@ dist/
 .memory/
 application-context/
 data/
+*.zip
 
 # Secrets & local auth
 .env
@@ -18,9 +19,11 @@ storage-state.json
 
 # Logs & test artifacts
 *.log
+npm-debug.log*
 coverage/
 test-results/
 playwright-report/
+.eslintcache
 
 # OS / editor
 .DS_Store

@@ -28,6 +28,8 @@
   --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 24px rgba(15, 23, 42, 0.04);
   --radius: 12px;
   --font: "DM Sans", "Segoe UI", sans-serif;
+  --font-graph: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-graph-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
   --mono: "JetBrains Mono", ui-monospace, monospace;
   --left-w: 320px;
   --right-w: 340px;
@@ -1771,6 +1773,309 @@ svg {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.graph-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 0.65rem 0.85rem 0.75rem;
+  gap: 0.45rem;
+}
+
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.graph-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.graph-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+
+.graph-zoom .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.graph-zoom .icon-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.graph-zoom-pct {
+  min-width: 3rem;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-zoom #btn-graph-zoom-reset {
+  border-left: 1px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  margin-left: 0.1rem;
+}
+
+.graph-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.graph-meta .sep {
+  opacity: 0.5;
+}
+
+.graph-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.graph-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary) 4%, transparent), transparent 28%),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 0) 0 0 / 16px 16px,
+    var(--bg-elevated);
+}
+
+.graph-empty,
+#graph-empty {
+  margin: 2.5rem 1.25rem;
+  text-align: center;
+}
+
+.graph-svg {
+  display: block;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  padding: 8px;
+  box-sizing: content-box;
+  color: var(--text-muted);
+  font-family: var(--font-graph);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.graph-svg text {
+  font-family: var(--font-graph) !important;
+  font-weight: 400 !important;
+  font-style: normal;
+  paint-order: normal;
+}
+
+.graph-svg .g-edge {
+  fill: none;
+  stroke: color-mix(in srgb, var(--primary) 45%, var(--border-strong));
+  stroke-width: 1.75;
+}
+
+.graph-svg .g-arrow-head {
+  fill: color-mix(in srgb, var(--primary) 45%, var(--border-strong));
+}
+
+.graph-svg .g-edge-chip rect {
+  fill: var(--bg-elevated);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.graph-svg .g-edge-chip text,
+.graph-svg .g-edge-label {
+  fill: var(--text-muted) !important;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400 !important;
+  font-family: var(--font-graph) !important;
+  text-anchor: middle;
+  dominant-baseline: alphabetic;
+}
+
+.graph-svg .g-card {
+  fill: var(--bg-elevated);
+  stroke: var(--border);
+  stroke-width: 1.25;
+}
+
+.graph-svg .g-accent {
+  fill: var(--text-muted);
+}
+
+.graph-svg .g-node.status-completed .g-accent {
+  fill: var(--success);
+}
+
+.graph-svg .g-node.status-exploring .g-accent,
+.graph-svg .g-node.status-discovered .g-accent {
+  fill: var(--info, #3b82f6);
+}
+
+.graph-svg .g-node.status-blocked .g-accent {
+  fill: var(--danger, #ef4444);
+}
+
+.graph-svg .g-node.is-root .g-accent {
+  fill: var(--primary);
+}
+
+.graph-svg .g-node.is-root .g-card {
+  stroke: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+
+.graph-svg .g-kicker {
+  fill: var(--text-faint) !important;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 400 !important;
+  letter-spacing: 0.06em;
+  font-family: var(--font-graph) !important;
+}
+
+.graph-svg .g-title {
+  fill: var(--text) !important;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400 !important;
+  font-family: var(--font-graph) !important;
+}
+
+.graph-svg .g-sub {
+  fill: var(--text-muted) !important;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400 !important;
+  font-family: var(--font-graph-mono) !important;
+}
+
+.graph-svg .g-node {
+  cursor: pointer;
+}
+
+.graph-svg .g-node:hover .g-card,
+.graph-svg .g-node.selected .g-card {
+  stroke: var(--primary);
+  stroke-width: 1.75;
+}
+
+.graph-svg .g-node.selected .g-card {
+  fill: color-mix(in srgb, var(--primary-soft, var(--primary)) 35%, var(--bg-elevated));
+}
+
+.graph-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.graph-detail.hidden {
+  display: none;
+}
+
+.graph-detail-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.graph-detail-main strong {
+  font-size: 0.9rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-detail .mono {
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-detail #graph-detail-meta {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.graph-legend-note {
+  margin-left: auto;
+  opacity: 0.85;
+}
+
+.graph-legend .gl {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--text-muted);
+}
+
+.graph-legend .gl.completed {
+  background: var(--success);
+}
+
+.graph-legend .gl.exploring,
+.graph-legend .gl.discovered {
+  background: var(--info, #3b82f6);
+}
+
+.graph-legend .gl.blocked {
+  background: var(--danger, #ef4444);
 }
 
 .canvas-shell {

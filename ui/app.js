@@ -33,6 +33,9 @@ const state = {
   selectedId: /** @type {string | null} */ (null),
   events: /** @type {ExplorationEvent[]} */ ([]),
   documents: /** @type {Array<{name:string;label:string;kind:string;description?:string;available:boolean;size?:number}>} */ ([]),
+  graph: /** @type {{ pages: Array<Record<string, unknown>>; transitions: Array<Record<string, unknown>> } | null} */ (null),
+  graphZoom: 1,
+  centerTab: "live",
   sse: /** @type {EventSource | null} */ (null),
   autoScroll: true,
   durationTimer: /** @type {number | null} */ (null),
@@ -113,6 +116,21 @@ const els = {
   setUrl: /** @type {HTMLElement} */ ($("set-url")),
   setUser: /** @type {HTMLElement} */ ($("set-user")),
   setFw: /** @type {HTMLElement} */ ($("set-fw")),
+  graphNodeCount: /** @type {HTMLElement} */ ($("graph-node-count")),
+  graphEdgeCount: /** @type {HTMLElement} */ ($("graph-edge-count")),
+  graphEmpty: /** @type {HTMLElement} */ ($("graph-empty")),
+  graphSvg: /** @type {SVGSVGElement} */ ($("graph-svg")),
+  graphViewport: /** @type {HTMLElement} */ ($("graph-viewport")),
+  graphDetail: /** @type {HTMLElement} */ ($("graph-detail")),
+  graphDetailTitle: /** @type {HTMLElement} */ ($("graph-detail-title")),
+  graphDetailStatus: /** @type {HTMLElement} */ ($("graph-detail-status")),
+  graphDetailUrl: /** @type {HTMLElement} */ ($("graph-detail-url")),
+  graphDetailMeta: /** @type {HTMLElement} */ ($("graph-detail-meta")),
+  graphZoomPct: /** @type {HTMLElement} */ ($("graph-zoom-pct")),
+  btnGraphZoomIn: /** @type {HTMLButtonElement} */ ($("btn-graph-zoom-in")),
+  btnGraphZoomOut: /** @type {HTMLButtonElement} */ ($("btn-graph-zoom-out")),
+  btnGraphZoomReset: /** @type {HTMLButtonElement} */ ($("btn-graph-zoom-reset")),
+  btnGraphRefresh: /** @type {HTMLButtonElement} */ ($("btn-graph-refresh")),
   docModal: /** @type {HTMLElement} */ ($("doc-modal")),
   docModalTitle: /** @type {HTMLElement} */ ($("doc-modal-title")),
   docContent: /** @type {HTMLElement} */ ($("doc-content")),
@@ -724,6 +742,12 @@ function connectSse(sessionId) {
       state.events.push(event);
       renderTimeline(state.events);
     }
+    if (
+      state.centerTab === "graph" &&
+      (event.type === "page_discovered" || event.type === "action_completed")
+    ) {
+      void refreshGraph(state.selectedId);
+    }
   });
 
   es.addEventListener("session", (msg) => {
@@ -735,6 +759,9 @@ function connectSse(sessionId) {
       renderChanges(session);
       if (session.status === "completed" || session.status === "failed") {
         void refreshDocuments(session.id);
+        void refreshGraph(session.id);
+      } else if (state.centerTab === "graph" && isLive(session.status)) {
+        void refreshGraph(session.id);
       }
     }
   });
@@ -768,6 +795,7 @@ async function selectSession(sessionId) {
     state.documents = documents || [];
     renderSessionDetail(session);
     connectSse(sessionId);
+    void refreshGraph(sessionId);
   } catch (err) {
     alert(err instanceof Error ? err.message : String(err));
   }
@@ -792,11 +820,356 @@ function closeMenu() {
 }
 
 function setCenterTab(tab) {
-  for (const id of ["live", "changes", "stats", "settings"]) {
+  state.centerTab = tab;
+  for (const id of ["live", "changes", "stats", "graph", "settings"]) {
     const btn = document.getElementById(`ctab-${id}`);
     const panel = document.getElementById(`panel-${id}`);
     btn?.classList.toggle("active", id === tab);
     panel?.classList.toggle("hidden", id !== tab);
+  }
+  if (tab === "graph") void refreshGraph(state.selectedId);
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function truncateLabel(text, max = 22) {
+  const s = String(text || "").trim() || "Untitled";
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+function shortUrl(url) {
+  try {
+    const u = new URL(url, "http://local.invalid");
+    const path = `${u.pathname}${u.hash}`;
+    return path || "/";
+  } catch {
+    return String(url || "/");
+  }
+}
+
+function humanizeSegment(seg) {
+  const cleaned = String(seg || "")
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
+  if (!cleaned) return "Page";
+  return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Prefer a readable path-based label over repeated document titles. */
+function pageDisplayName(page, pages) {
+  const path = shortUrl(String(page.url || ""));
+  const parts = path.split("/").filter(Boolean);
+  let seg = parts[parts.length - 1] || "home";
+  if (/^(index|default|home)(\.|$)/i.test(seg) && parts.length > 1) {
+    seg = parts[parts.length - 2];
+  }
+  let label = humanizeSegment(seg);
+
+  const samePath = (pages || []).filter((p) => shortUrl(String(p.url || "")) === path);
+  if (samePath.length > 1) {
+    const idx = samePath.findIndex((p) => p.id === page.id) + 1;
+    label = `${label} · state ${idx}`;
+  }
+
+  return label;
+}
+
+function actionLabel(action) {
+  const type = String(action?.type || "action");
+  const el = String(action?.element || "").trim();
+  if (!el) return type;
+  return `${type} “${truncateLabel(el, 18)}”`;
+}
+
+function clearGraphDetail() {
+  els.graphDetail.classList.add("hidden");
+  els.graphDetailTitle.textContent = "—";
+  els.graphDetailStatus.textContent = "—";
+  els.graphDetailStatus.className = "status-pill";
+  els.graphDetailUrl.textContent = "—";
+  els.graphDetailMeta.textContent = "—";
+}
+
+function showGraphDetail(page, pages, transitions) {
+  const label = pageDisplayName(page, pages);
+  const status = String(page.status || "DISCOVERED");
+  els.graphDetail.classList.remove("hidden");
+  els.graphDetailTitle.textContent = label;
+  els.graphDetailStatus.textContent = status;
+  els.graphDetailStatus.className = `status-pill ${status.toLowerCase()}`;
+  els.graphDetailUrl.textContent = String(page.url || "—");
+
+  const inbound = transitions.filter((t) => t.to === page.id);
+  const outbound = transitions.filter((t) => t.from === page.id);
+  const reached =
+    page.reachedBy?.action && page.reachedBy?.element
+      ? `Reached by ${page.reachedBy.action} “${page.reachedBy.element}”`
+      : inbound[0]
+        ? `Reached by ${actionLabel(inbound[0].action)}`
+        : "Start / root page";
+  els.graphDetailMeta.textContent = `${reached} · ${outbound.length} outgoing · ${page.elementIds?.length ?? "?"} elements`;
+}
+
+/**
+ * Layered left→right layout from transition DAG, then SVG render.
+ * @param {{ pages: Array<Record<string, any>>; transitions: Array<Record<string, any>> }} graph
+ */
+function renderGraphView(graph) {
+  const pages = graph?.pages || [];
+  const transitions = graph?.transitions || [];
+  els.graphNodeCount.textContent = `${pages.length} page${pages.length === 1 ? "" : "s"}`;
+  els.graphEdgeCount.textContent = `${transitions.length} transition${transitions.length === 1 ? "" : "s"}`;
+
+  if (!pages.length) {
+    clearGraphDetail();
+    els.graphEmpty.textContent = state.selectedId
+      ? "No graph data yet. Explore a session to discover pages and transitions."
+      : "Select a session to view its application graph.";
+    els.graphEmpty.classList.remove("hidden");
+    els.graphSvg.classList.add("hidden");
+    els.graphSvg.innerHTML = "";
+    return;
+  }
+
+  els.graphEmpty.classList.add("hidden");
+  els.graphSvg.classList.remove("hidden");
+
+  const pageById = new Map(pages.map((p) => [p.id, p]));
+  const incoming = new Map(pages.map((p) => [p.id, 0]));
+  for (const t of transitions) {
+    if (pageById.has(t.to)) incoming.set(t.to, (incoming.get(t.to) || 0) + 1);
+  }
+
+  /** @type {Map<string, number>} */
+  const depth = new Map();
+  const queue = [];
+  for (const p of pages) {
+    const isRoot =
+      !(typeof p.parentId === "string" && pageById.has(p.parentId)) &&
+      (incoming.get(p.id) || 0) === 0;
+    if (isRoot) {
+      depth.set(p.id, 0);
+      queue.push(p.id);
+    }
+  }
+  if (!queue.length && pages[0]) {
+    depth.set(pages[0].id, 0);
+    queue.push(pages[0].id);
+  }
+  for (const p of pages) {
+    if (!depth.has(p.id) && typeof p.parentId === "string" && !pageById.has(p.parentId)) {
+      depth.set(p.id, 0);
+      queue.push(p.id);
+    }
+  }
+
+  while (queue.length) {
+    const id = queue.shift();
+    const d = depth.get(id) ?? 0;
+    for (const t of transitions) {
+      if (t.from !== id || !pageById.has(t.to)) continue;
+      const next = d + 1;
+      if (!depth.has(t.to) || next < /** @type {number} */ (depth.get(t.to))) {
+        depth.set(t.to, next);
+        queue.push(t.to);
+      }
+    }
+  }
+  for (const p of pages) {
+    if (!depth.has(p.id)) {
+      if (typeof p.parentId === "string" && depth.has(p.parentId)) {
+        depth.set(p.id, /** @type {number} */ (depth.get(p.parentId)) + 1);
+      } else {
+        depth.set(p.id, Math.max(...depth.values(), 0) + 1);
+      }
+    }
+  }
+
+  /** @type {Map<number, string[]>} */
+  const layers = new Map();
+  for (const p of pages) {
+    const d = /** @type {number} */ (depth.get(p.id));
+    if (!layers.has(d)) layers.set(d, []);
+    layers.get(d).push(p.id);
+  }
+  const maxDepth = Math.max(...layers.keys(), 0);
+  for (const [, ids] of layers) {
+    ids.sort((a, b) =>
+      pageDisplayName(pageById.get(a), pages).localeCompare(pageDisplayName(pageById.get(b), pages)),
+    );
+  }
+
+  const nodeW = 196;
+  const nodeH = 70;
+  const gapX = 96;
+  const gapY = 28;
+  const padX = 36;
+  const padY = 28;
+  let maxRows = 1;
+  for (const ids of layers.values()) maxRows = Math.max(maxRows, ids.length);
+
+  const width = padX * 2 + (maxDepth + 1) * nodeW + maxDepth * gapX;
+  const height = padY * 2 + maxRows * nodeH + (maxRows - 1) * gapY;
+
+  /** @type {Map<string, {x:number;y:number;cx:number;cy:number}>} */
+  const pos = new Map();
+  for (let d = 0; d <= maxDepth; d++) {
+    const ids = layers.get(d) || [];
+    const colHeight = ids.length * nodeH + Math.max(0, ids.length - 1) * gapY;
+    const startY = padY + (height - padY * 2 - colHeight) / 2;
+    ids.forEach((id, i) => {
+      const x = padX + d * (nodeW + gapX);
+      const y = startY + i * (nodeH + gapY);
+      pos.set(id, { x, y, cx: x + nodeW / 2, cy: y + nodeH / 2 });
+    });
+  }
+
+  const edgeParts = [];
+  transitions.forEach((t, edgeIdx) => {
+    const a = pos.get(t.from);
+    const b = pos.get(t.to);
+    if (!a || !b) return;
+    const x1 = a.x + nodeW;
+    const y1 = a.cy;
+    const x2 = b.x;
+    const y2 = b.cy;
+    const dx = Math.max(40, (x2 - x1) * 0.45);
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    const label = actionLabel(t.action);
+    const labelW = Math.min(160, 18 + label.length * 6.2);
+    const labelH = 20;
+    edgeParts.push(`
+      <g class="g-edge-group">
+        <path class="g-edge" d="M${x1} ${y1} C${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}" marker-end="url(#g-arrow)"/>
+        <g class="g-edge-chip" transform="translate(${midX - labelW / 2} ${midY - labelH / 2 - (edgeIdx % 2 === 0 ? 0 : 10)})">
+          <rect width="${labelW}" height="${labelH}" rx="10"/>
+          <text class="g-edge-label" x="${labelW / 2}" y="${labelH / 2 + 4}"
+            font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="10" font-weight="400"
+            fill="currentColor">${escapeXml(truncateLabel(label, 24))}</text>
+        </g>
+      </g>
+    `);
+  });
+
+  const nodeParts = pages.map((p) => {
+    const pnt = pos.get(p.id);
+    if (!pnt) return "";
+    const status = String(p.status || "DISCOVERED").toLowerCase();
+    const title = truncateLabel(pageDisplayName(p, pages), 22);
+    const path = truncateLabel(shortUrl(String(p.url || "")), 28);
+    const isRoot = (depth.get(p.id) || 0) === 0;
+    return `
+      <g class="g-node status-${escapeXml(status)}${isRoot ? " is-root" : ""}" data-page-id="${escapeXml(p.id)}" transform="translate(${pnt.x} ${pnt.y})" role="button" tabindex="0">
+        <title>${escapeXml(`${pageDisplayName(p, pages)}\n${p.url || ""}\n${p.status || ""}`)}</title>
+        <rect class="g-card" width="${nodeW}" height="${nodeH}" rx="12"/>
+        <rect class="g-accent" x="0" y="0" width="4" height="${nodeH}" rx="2"/>
+        <text class="g-kicker" x="16" y="22"
+          font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="9" font-weight="400"
+          fill="currentColor" letter-spacing="0.06em">${isRoot ? "START" : escapeXml(String(p.status || "").toUpperCase())}</text>
+        <text class="g-title" x="16" y="42"
+          font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="13" font-weight="400"
+          fill="currentColor">${escapeXml(title)}</text>
+        <text class="g-sub" x="16" y="58"
+          font-family="IBM Plex Mono, JetBrains Mono, monospace" font-size="10" font-weight="400"
+          fill="currentColor">${escapeXml(path)}</text>
+      </g>
+    `;
+  });
+
+  els.graphSvg.setAttribute("viewBox", `0 0 ${Math.max(width, 420)} ${Math.max(height, 220)}`);
+  els.graphSvg.innerHTML = `
+    <defs>
+      <marker id="g-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M0 1.5L8 5L0 8.5z" class="g-arrow-head"/>
+      </marker>
+    </defs>
+    <g class="g-edges">${edgeParts.join("")}</g>
+    <g class="g-nodes">${nodeParts.join("")}</g>
+  `;
+  applyGraphZoom();
+
+  const selectNode = (pageId) => {
+    els.graphSvg.querySelectorAll(".g-node").forEach((n) => n.classList.remove("selected"));
+    const node = els.graphSvg.querySelector(`.g-node[data-page-id="${CSS.escape(pageId)}"]`);
+    node?.classList.add("selected");
+    const page = pageById.get(pageId);
+    if (page) showGraphDetail(page, pages, transitions);
+  };
+
+  els.graphSvg.querySelectorAll(".g-node").forEach((node) => {
+    node.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = node.getAttribute("data-page-id");
+      if (id) selectNode(id);
+    });
+    node.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        const id = node.getAttribute("data-page-id");
+        if (id) selectNode(id);
+      }
+    });
+  });
+
+  // Auto-select start page for immediate context
+  const rootId =
+    [...depth.entries()].find(([, d]) => d === 0)?.[0] || pages[0]?.id;
+  if (rootId) selectNode(rootId);
+}
+
+function applyGraphZoom() {
+  const zoom = state.graphZoom;
+  els.graphZoomPct.textContent = `${Math.round(zoom * 100)}%`;
+  const vb = els.graphSvg.viewBox?.baseVal;
+  const baseW = vb?.width > 0 ? vb.width : 640;
+  const baseH = vb?.height > 0 ? vb.height : 260;
+  els.graphSvg.style.width = `${baseW * zoom}px`;
+  els.graphSvg.style.height = `${baseH * zoom}px`;
+  els.graphSvg.style.minWidth = `${baseW * zoom}px`;
+  els.graphSvg.style.transform = "";
+  els.btnGraphZoomOut.disabled = zoom <= 0.5;
+  els.btnGraphZoomIn.disabled = zoom >= 2.5;
+}
+
+function setGraphZoom(next) {
+  const clamped = Math.min(2.5, Math.max(0.5, Math.round(next * 20) / 20));
+  state.graphZoom = clamped;
+  applyGraphZoom();
+}
+
+async function refreshGraph(sessionId) {
+  if (!sessionId) {
+    state.graph = null;
+    clearGraphDetail();
+    renderGraphView({ pages: [], transitions: [] });
+    return;
+  }
+  try {
+    const data = await api(`/api/sessions/${encodeURIComponent(sessionId)}/graph`);
+    if (!Array.isArray(data?.pages)) {
+      throw new Error("Graph API unavailable — restart the UI server (npm run ui)");
+    }
+    state.graph = data;
+    renderGraphView(data);
+  } catch (err) {
+    clearGraphDetail();
+    els.graphEmpty.textContent =
+      err instanceof Error
+        ? err.message
+        : "Could not load graph. Restart the UI server and try Refresh.";
+    els.graphEmpty.classList.remove("hidden");
+    els.graphSvg.classList.add("hidden");
+    els.graphNodeCount.textContent = "0 pages";
+    els.graphEdgeCount.textContent = "0 transitions";
   }
 }
 
@@ -882,9 +1255,25 @@ document.addEventListener("click", (e) => {
   }
 });
 
-for (const id of ["live", "changes", "stats", "settings"]) {
+for (const id of ["live", "changes", "stats", "graph", "settings"]) {
   document.getElementById(`ctab-${id}`)?.addEventListener("click", () => setCenterTab(id));
 }
+
+els.btnGraphRefresh.addEventListener("click", () => void refreshGraph(state.selectedId));
+els.btnGraphZoomIn.addEventListener("click", () => setGraphZoom(state.graphZoom + 0.25));
+els.btnGraphZoomOut.addEventListener("click", () => setGraphZoom(state.graphZoom - 0.25));
+els.btnGraphZoomReset.addEventListener("click", () => setGraphZoom(1));
+
+els.graphViewport.addEventListener(
+  "wheel",
+  (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    if (state.centerTab !== "graph") return;
+    e.preventDefault();
+    setGraphZoom(state.graphZoom + (e.deltaY < 0 ? 0.1 : -0.1));
+  },
+  { passive: false },
+);
 
 els.btnDownloadAll.addEventListener("click", downloadAll);
 els.btnDownloadZip.addEventListener("click", downloadAll);
@@ -975,6 +1364,7 @@ els.btnDeleteSession.addEventListener("click", async () => {
     state.events = [];
     state.documents = [];
     state.selectedId = null;
+    state.graph = null;
     renderSessionLists();
     if (state.sessions.length) {
       await selectSession(state.sessions[0].id);
@@ -984,6 +1374,7 @@ els.btnDeleteSession.addEventListener("click", async () => {
       renderHeader(null);
       renderChanges(null);
       renderTimeline([]);
+      renderGraphView({ pages: [], transitions: [] });
     }
   } catch (err) {
     alert(err instanceof Error ? err.message : String(err));

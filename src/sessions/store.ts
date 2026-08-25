@@ -133,6 +133,45 @@ export class SessionStore {
     return `exploration-${String(n).padStart(3, "0")}`;
   }
 
+  /** Load application graph (pages + transitions) from session memory. */
+  async loadGraph(sessionId: string): Promise<{
+    pages: Array<Record<string, unknown>>;
+    transitions: Array<Record<string, unknown>>;
+  }> {
+    const dir = this.memoryDir(sessionId);
+    const readArr = async (filePath: string) => {
+      try {
+        const raw = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+        return Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
+      } catch {
+        return [];
+      }
+    };
+
+    let pages = await readArr(path.join(dir, "pages.json"));
+    let transitions = await readArr(path.join(dir, "transitions.json"));
+
+    // Fallback for sessions that only have application-context written
+    if (pages.length === 0) {
+      try {
+        const text = await readFile(
+          path.join(this.contextDir(sessionId), "application.json"),
+          "utf8",
+        );
+        const ctx = JSON.parse(text) as {
+          pages?: Array<Record<string, unknown>>;
+          transitions?: Array<Record<string, unknown>>;
+        };
+        if (Array.isArray(ctx.pages)) pages = ctx.pages;
+        if (Array.isArray(ctx.transitions)) transitions = ctx.transitions;
+      } catch {
+        // keep empty
+      }
+    }
+
+    return { pages, transitions };
+  }
+
   async saveEvents(sessionId: string, events: ExplorationEvent[]): Promise<void> {
     await this.ensureSession(sessionId);
     const parsed = events.map((e) => ExplorationEventSchema.parse(e));

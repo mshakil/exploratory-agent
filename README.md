@@ -54,11 +54,14 @@ npx agent-explorer explore \
 
 - Enter URL, optional credentials, and framework (Independent, Playwright, Selenium Java)
 - Watch live discovery (pages, elements, actions, flows, ETA)
+- Open the **Graph** tab to inspect the application state graph (pages + transitions), with zoom and page details
 - Download `CONTEXT.md`, individual docs, or a full zip
 - Resume a completed session to re-explore and review change reports
 - Dark / light theme (persisted in the browser)
 
 Passwords are never persisted. Framework selection only affects generated documentation.
+
+After changing server code, restart `npm run ui` so new API routes (such as `/api/sessions/:id/graph`) are loaded.
 
 ## CLI
 
@@ -140,9 +143,9 @@ src/
 ├── discovery/       Page/element discovery + action classification
 ├── selectors/       Candidate generation and ranking
 ├── state/           State fingerprinting
-├── graph/           Application graph
+├── graph/           Application graph (pages + transitions)
 ├── memory/          JSON persistence
-├── sessions/        Multi-app sessions, runs, resume
+├── sessions/        Multi-app sessions, runs, resume (+ graph API)
 ├── server/          HTTP + SSE UI server
 ├── flows/           Flow extraction
 ├── changes/         Diff previous vs current context
@@ -150,9 +153,11 @@ src/
 ├── documentation/   Markdown + JSON + CONTEXT.md
 ├── ai/              Optional LLM hooks (noop by default)
 └── models/          Domain models (Zod)
-ui/                  Live exploration canvas (static)
+ui/                  Live exploration canvas (static; includes Graph tab)
 data/sessions/       Persisted multi-app exploration sessions
 ```
+
+The in-memory `ApplicationGraph` stores discovered UI states as nodes and state-changing actions as edges. The UI Graph tab reads the same data from session memory (with a fallback to `application.json`).
 
 Core domain code depends on `BrowserAdapter`, not Playwright directly.  
 The application model stays framework-neutral; framework generators only map selectors into docs.

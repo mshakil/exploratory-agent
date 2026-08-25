@@ -226,6 +226,17 @@ async function handleRequest(
       return;
     }
 
+    if (rest === "/graph" && method === "GET") {
+      const session = await manager.getSession(sessionId);
+      if (!session) {
+        json(res, 404, { error: "Session not found" });
+        return;
+      }
+      const graph = await manager.getGraph(sessionId);
+      json(res, 200, graph);
+      return;
+    }
+
     if (rest === "/resume" && method === "POST") {
       const body = await readJsonBody<{
         password?: string;

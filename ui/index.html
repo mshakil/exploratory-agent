@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
@@ -167,6 +167,7 @@
               <button type="button" class="ctab active" data-ctab="live" id="ctab-live">Live Exploration</button>
               <button type="button" class="ctab" data-ctab="changes" id="ctab-changes">Change Summary</button>
               <button type="button" class="ctab" data-ctab="stats" id="ctab-stats">Statistics</button>
+              <button type="button" class="ctab" data-ctab="graph" id="ctab-graph">Graph</button>
               <button type="button" class="ctab" data-ctab="settings" id="ctab-settings">Settings</button>
             </div>
 
@@ -227,6 +228,54 @@
                 <div><dt>Completed</dt><dd id="ov-completed">—</dd></div>
                 <div><dt>Session ID</dt><dd class="mono" id="ov-id">—</dd></div>
               </dl>
+            </div>
+
+            <div class="ctab-panel hidden" id="panel-graph">
+              <div class="graph-panel">
+                <div class="graph-toolbar">
+                  <div class="graph-meta">
+                    <span id="graph-node-count">0 pages</span>
+                    <span class="sep">·</span>
+                    <span id="graph-edge-count">0 transitions</span>
+                  </div>
+                  <div class="graph-toolbar-actions">
+                    <div class="graph-zoom" role="group" aria-label="Graph zoom">
+                      <button type="button" class="icon-btn" id="btn-graph-zoom-out" title="Zoom out" aria-label="Zoom out">
+                        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+                      </button>
+                      <span class="graph-zoom-pct" id="graph-zoom-pct">100%</span>
+                      <button type="button" class="icon-btn" id="btn-graph-zoom-in" title="Zoom in" aria-label="Zoom in">
+                        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                      </button>
+                      <button type="button" class="btn ghost compact" id="btn-graph-zoom-reset" title="Reset zoom">Reset</button>
+                    </div>
+                    <button type="button" class="btn ghost compact" id="btn-graph-refresh" title="Refresh graph">
+                      <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0114.9-4M20 12a8 8 0 01-14.9 4M16 4v4h4M8 20v-4H4"/></svg>
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+                <p class="graph-hint" id="graph-hint">Pages flow left → right. Click a page for details.</p>
+                <div class="graph-viewport" id="graph-viewport">
+                  <p class="empty-hint" id="graph-empty">Select a session to view its application graph.</p>
+                  <svg id="graph-svg" class="graph-svg hidden" xmlns="http://www.w3.org/2000/svg"></svg>
+                </div>
+                <div class="graph-detail hidden" id="graph-detail">
+                  <div class="graph-detail-main">
+                    <strong id="graph-detail-title">—</strong>
+                    <span class="status-pill" id="graph-detail-status">—</span>
+                  </div>
+                  <p class="mono muted" id="graph-detail-url">—</p>
+                  <p class="muted" id="graph-detail-meta">—</p>
+                </div>
+                <div class="graph-legend">
+                  <span><i class="gl completed"></i> Completed</span>
+                  <span><i class="gl exploring"></i> Exploring</span>
+                  <span><i class="gl discovered"></i> Discovered</span>
+                  <span><i class="gl blocked"></i> Blocked</span>
+                  <span class="graph-legend-note">Arrow label = action that opened the next page</span>
+                </div>
+              </div>
             </div>
 
             <div class="ctab-panel hidden" id="panel-settings">

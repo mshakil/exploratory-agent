@@ -82,6 +82,13 @@ export class SessionManager {
     return this.store.listRuns(sessionId);
   }
 
+  async getGraph(sessionId: string): Promise<{
+    pages: Array<Record<string, unknown>>;
+    transitions: Array<Record<string, unknown>>;
+  }> {
+    return this.store.loadGraph(sessionId);
+  }
+
   onSessionEvent(
     sessionId: string,
     listener: (event: ExplorationEvent) => void,

@@ -1,0 +1,44 @@
+{
+  "name": "agent-explorer",
+  "version": "1.0.0",
+  "description": "Standalone application exploration agent for SDETs — discovers UI structure, workflows, and selectors",
+  "type": "module",
+  "bin": {
+    "agent-explorer": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli/index.ts",
+    "start": "node dist/cli/index.js",
+    "ui": "tsx src/cli/index.ts ui",
+    "ui:prod": "node dist/cli/index.js ui",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo": "npx serve demo -l 4173 --no-clipboard",
+    "prepare:browsers": "playwright install chromium",
+    "setup": "npm install && npm run prepare:browsers && npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "exploration",
+    "sdet",
+    "playwright",
+    "selectors",
+    "qa"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^13.1.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.51.0",
+    "@types/node": "^22.13.10",
+    "playwright": "^1.51.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

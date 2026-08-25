@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo CRM</title>
+  <style>
+    :root {
+      --bg: #f3f6f9;
+      --ink: #1a2332;
+      --accent: #0b6e4f;
+      --danger: #9b2226;
+      --card: #ffffff;
+      --line: #d5dde5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: linear-gradient(160deg, #e8eef4, #f7fafc 40%, #eef6f1);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header {
+      background: var(--ink);
+      color: white;
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    header a {
+      color: #cde7db;
+      text-decoration: none;
+      margin-right: 0.75rem;
+    }
+    header a.active { color: #fff; font-weight: 600; text-decoration: underline; }
+    main { padding: 1.25rem; max-width: 960px; margin: 0 auto; }
+    .hidden { display: none !important; }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+    h1, h2 { margin-top: 0; }
+    label { display: block; margin: 0.5rem 0 0.25rem; font-size: 0.9rem; }
+    input, select, textarea, button {
+      font: inherit;
+      padding: 0.45rem 0.6rem;
+      margin-bottom: 0.5rem;
+    }
+    input, select, textarea {
+      width: 100%;
+      max-width: 360px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    button {
+      border: 1px solid var(--line);
+      background: #eef2f6;
+      cursor: pointer;
+      margin-right: 0.4rem;
+    }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid var(--line); padding: 0.5rem; text-align: left; }
+    .tabs button.active { background: var(--accent); color: #fff; }
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.35);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .modal {
+      background: #fff; padding: 1.25rem; width: min(420px, 92vw);
+      border: 1px solid var(--line);
+    }
+    .pager button { min-width: 2.2rem; }
+    .flash { background: #e7f6ee; border: 1px solid #b7e0c8; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    const state = {
+      route: "login",
+      user: sessionStorage.getItem("demoUser"),
+      users: [
+        { id: 1, name: "Ada Lovelace", country: "UK", role: "Admin", active: true },
+        { id: 2, name: "Grace Hopper", country: "USA", role: "Editor", active: true },
+        { id: 3, name: "Alan Turing", country: "UK", role: "Viewer", active: false },
+        { id: 4, name: "Katherine Johnson", country: "USA", role: "Editor", active: true },
+        { id: 5, name: "Hedy Lamarr", country: "UAE", role: "Viewer", active: true },
+      ],
+      page: 1,
+      pageSize: 3,
+      tab: "overview",
+      modalOpen: false,
+      flash: "",
+      form: { name: "", country: "Pakistan", role: "Viewer", newsletter: false, plan: "basic" },
+      editId: null,
+      settings: { theme: "light", notifications: true },
+    };
+
+    function navigate(route) {
+      state.route = route;
+      state.flash = "";
+      state.modalOpen = false;
+      const hash = "#/" + route;
+      if (location.hash !== hash) {
+        history.pushState(null, "", hash);
+      }
+      render();
+    }
+
+    function requireAuth(route) {
+      if (!state.user && route !== "login") {
+        navigate("login");
+        return false;
+      }
+      return true;
+    }
+
+    function render() {
+      const root = document.getElementById("app");
+      if (state.route === "login") {
+        root.innerHTML = renderLogin();
+        bindLogin();
+        return;
+      }
+      root.innerHTML = `
+        <header>
+          <strong>Demo CRM</strong>
+          <nav>
+            <a href="#/dashboard" data-nav="dashboard" class="${state.route==='dashboard'?'active':''}">Dashboard</a>
+            <a href="#/users" data-nav="users" class="${state.route==='users'?'active':''}">Users</a>
+            <a href="#/reports" data-nav="reports" class="${state.route==='reports'?'active':''}">Reports</a>
+            <a href="#/settings" data-nav="settings" class="${state.route==='settings'?'active':''}">Settings</a>
+          </nav>
+          <button data-testid="logout-button" class="danger" id="logoutBtn">Logout</button>
+        </header>
+        <main>
+          ${state.flash ? `<div class="flash" data-testid="flash">${state.flash}</div>` : ""}
+          ${renderRoute()}
+        </main>
+        ${state.modalOpen ? renderModal() : ""}
+      `;
+      bindShell();
+    }
+
+    function renderLogin() {
+      return `
+        <main>
+          <div class="panel" data-page="login">
+            <h1>Login</h1>
+            <p>Sign in to explore the demo application.</p>
+            <label for="username">Username</label>
+            <input id="username" name="username" data-testid="login-username" />
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" data-testid="login-password" />
+            <div>
+              <button class="primary" data-testid="login-submit" id="loginSubmit">Sign In</button>
+            </div>
+          </div>
+        </main>`;
+    }
+
+    function renderRoute() {
+      switch (state.route) {
+        case "dashboard": return renderDashboard();
+        case "users": return renderUsers();
+        case "create-user": return renderCreateUser();
+        case "edit-user": return renderEditUser();
+        case "reports": return renderReports();
+        case "settings": return renderSettings();
+        default: return renderDashboard();
+      }
+    }
+
+    function renderDashboard() {
+      return `
+        <div class="panel" data-page="dashboard">
+          <h1>Dashboard</h1>
+          <p>Welcome, ${state.user}.</p>
+          <div class="tabs">
+            <button data-testid="tab-overview" class="${state.tab==='overview'?'active':''}" data-tab="overview">Overview</button>
+            <button data-testid="tab-activity" class="${state.tab==='activity'?'active':''}" data-tab="activity">Activity</button>
+          </div>
+          <div style="margin-top:1rem">
+            ${state.tab === "overview"
+              ? `<p>Users in system: <strong>${state.users.length}</strong></p>
+                 <button data-testid="open-info-modal" id="openModal">Open Info Modal</button>`
+              : `<p>Recent activity: user list viewed, reports opened.</p>`}
+          </div>
+        </div>`;
+    }
+
+    function renderUsers() {
+      const start = (state.page - 1) * state.pageSize;
+      const rows = state.users.slice(start, start + state.pageSize);
+      const pages = Math.ceil(state.users.length / state.pageSize);
+      return `
+        <div class="panel" data-page="users">
+          <h1>Users</h1>
+          <button class="primary" data-testid="create-user" id="createUser">Create User</button>
+          <button data-testid="filter-active" id="filterActive">Apply Filter</button>
+          <table data-testid="users-table">
+            <thead><tr><th>Name</th><th>Country</th><th>Role</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${rows.map(u => `
+                <tr>
+                  <td>${u.name}</td><td>${u.country}</td><td>${u.role}</td>
+                  <td>
+                    <button data-testid="edit-user-${u.id}" data-edit="${u.id}">Edit</button>
+                    <button class="danger" data-testid="delete-user-${u.id}" data-delete="${u.id}">Delete</button>
+                  </td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+          <div class="pager" data-testid="pagination">
+            <button data-testid="page-prev" id="pagePrev" ${state.page<=1?"disabled":""}>Prev</button>
+            <span>Page ${state.page} / ${pages}</span>
+            <button data-testid="page-next" id="pageNext" ${state.page>=pages?"disabled":""}>Next</button>
+          </div>
+        </div>`;
+    }
+
+    function renderCreateUser() {
+      const f = state.form;
+      return `
+        <div class="panel" data-page="create-user">
+          <h1>Create User</h1>
+          <label for="name">Name</label>
+          <input id="name" name="name" data-testid="user-name" value="${f.name}" />
+          <label for="country">Country</label>
+          <select id="country" name="country" data-testid="user-country">
+            ${["Pakistan","UAE","UK","USA"].map(c => `<option ${f.country===c?"selected":""}>${c}</option>`).join("")}
+          </select>
+          <label for="role">Role</label>
+          <select id="role" name="role" data-testid="user-role">
+            ${["Admin","Editor","Viewer"].map(r => `<option ${f.role===r?"selected":""}>${r}</option>`).join("")}
+          </select>
+          <label><input type="checkbox" data-testid="user-newsletter" id="newsletter" ${f.newsletter?"checked":""}/> Newsletter</label>
+          <fieldset>
+            <legend>Plan</legend>
+            <label><input type="radio" name="plan" value="basic" data-testid="plan-basic" ${f.plan==="basic"?"checked":""}/> Basic</label>
+            <label><input type="radio" name="plan" value="pro" data-testid="plan-pro" ${f.plan==="pro"?"checked":""}/> Pro</label>
+          </fieldset>
+          <button class="primary" data-testid="save-user" id="saveUser">Save User</button>
+          <button data-testid="cancel-create" id="cancelCreate">Cancel</button>
+        </div>`;
+    }
+
+    function renderEditUser() {
+      const u = state.users.find(x => x.id === state.editId) || state.users[0];
+      return `
+        <div class="panel" data-page="edit-user">
+          <h1>Edit User</h1>
+          <label for="edit-name">Name</label>
+          <input id="edit-name" data-testid="edit-user-name" value="${u.name}" />
+          <button class="primary" data-testid="save-edit-user" id="saveEdit">Save</button>
+          <button data-testid="cancel-edit" id="cancelEdit">Cancel</button>
+          <button class="danger" data-testid="remove-user" id="removeUser">Remove</button>
+        </div>`;
+    }
+
+    function renderReports() {
+      return `
+        <div class="panel" data-page="reports">
+          <h1>Reports</h1>
+          <label for="report-type">Report Type</label>
+          <select id="report-type" data-testid="report-type">
+            <option>Usage</option><option>Revenue</option><option>Errors</option>
+          </select>
+          <button data-testid="apply-report-filter" id="applyReport">Apply Filter</button>
+          <button data-testid="sort-reports" id="sortReports">Sort</button>
+          <button class="danger" data-testid="publish-report" id="publishReport">Publish</button>
+        </div>`;
+    }
+
+    function renderSettings() {
+      return `
+        <div class="panel" data-page="settings">
+          <h1>Settings</h1>
+          <label for="theme">Theme</label>
+          <select id="theme" data-testid="settings-theme">
+            <option value="light" ${state.settings.theme==="light"?"selected":""}>Light</option>
+            <option value="dark" ${state.settings.theme==="dark"?"selected":""}>Dark</option>
+          </select>
+          <label><input type="checkbox" data-testid="settings-notifications" id="notifications" ${state.settings.notifications?"checked":""}/> Notifications</label>
+          <button class="primary" data-testid="save-settings" id="saveSettings">Save Settings</button>
+          <button class="danger" data-testid="transfer-account" id="transferAccount">Transfer</button>
+        </div>`;
+    }
+
+    function renderModal() {
+      return `
+        <div class="modal-backdrop">
+          <div class="modal" role="dialog" aria-modal="true" data-testid="info-modal">
+            <h2>Info</h2>
+            <p>This is a safe informational modal.</p>
+            <button data-testid="close-modal" id="closeModal">Close</button>
+          </div>
+        </div>`;
+    }
+
+    function bindLogin() {
+      document.getElementById("loginSubmit").onclick = () => {
+        const user = document.getElementById("username").value || "explorer";
+        state.user = user;
+        sessionStorage.setItem("demoUser", user);
+        navigate("dashboard");
+      };
+    }
+
+    function bindShell() {
+      document.querySelectorAll("[data-nav]").forEach(a => {
+        a.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (!requireAuth(a.dataset.nav)) return;
+          navigate(a.dataset.nav);
+        });
+      });
+      const logout = document.getElementById("logoutBtn");
+      if (logout) logout.onclick = () => {
+        state.user = null;
+        sessionStorage.removeItem("demoUser");
+        navigate("login");
+      };
+
+      document.querySelectorAll("[data-tab]").forEach(btn => {
+        btn.onclick = () => { state.tab = btn.dataset.tab; render(); };
+      });
+      const openModal = document.getElementById("openModal");
+      if (openModal) openModal.onclick = () => { state.modalOpen = true; render(); };
+      const closeModal = document.getElementById("closeModal");
+      if (closeModal) closeModal.onclick = () => { state.modalOpen = false; render(); };
+
+      const createUser = document.getElementById("createUser");
+      if (createUser) createUser.onclick = () => navigate("create-user");
+      document.querySelectorAll("[data-edit]").forEach(btn => {
+        btn.onclick = () => { state.editId = Number(btn.dataset.edit); navigate("edit-user"); };
+      });
+      document.querySelectorAll("[data-delete]").forEach(btn => {
+        btn.onclick = () => { state.flash = "Delete skipped in UI demo confirmation"; render(); };
+      });
+      const pagePrev = document.getElementById("pagePrev");
+      if (pagePrev) pagePrev.onclick = () => { state.page = Math.max(1, state.page - 1); render(); };
+      const pageNext = document.getElementById("pageNext");
+      if (pageNext) pageNext.onclick = () => {
+        const pages = Math.ceil(state.users.length / state.pageSize);
+        state.page = Math.min(pages, state.page + 1); render();
+      };
+      const filterActive = document.getElementById("filterActive");
+      if (filterActive) filterActive.onclick = () => { state.flash = "Active filter applied"; render(); };
+
+      const saveUser = document.getElementById("saveUser");
+      if (saveUser) saveUser.onclick = () => {
+        const name = document.getElementById("name").value || "New User";
+        const country = document.getElementById("country").value;
+        const role = document.getElementById("role").value;
+        state.users.push({ id: Date.now(), name, country, role, active: true });
+        state.flash = "User created";
+        navigate("users");
+      };
+      const cancelCreate = document.getElementById("cancelCreate");
+      if (cancelCreate) cancelCreate.onclick = () => navigate("users");
+
+      const saveEdit = document.getElementById("saveEdit");
+      if (saveEdit) saveEdit.onclick = () => {
+        const u = state.users.find(x => x.id === state.editId);
+        if (u) u.name = document.getElementById("edit-name").value;
+        state.flash = "User updated";
+        navigate("users");
+      };
+      const cancelEdit = document.getElementById("cancelEdit");
+      if (cancelEdit) cancelEdit.onclick = () => navigate("users");
+      const removeUser = document.getElementById("removeUser");
+      if (removeUser) removeUser.onclick = () => { state.flash = "Remove is destructive"; render(); };
+
+      const applyReport = document.getElementById("applyReport");
+      if (applyReport) applyReport.onclick = () => { state.flash = "Report filter applied"; render(); };
+      const sortReports = document.getElementById("sortReports");
+      if (sortReports) sortReports.onclick = () => { state.flash = "Reports sorted"; render(); };
+      const publishReport = document.getElementById("publishReport");
+      if (publishReport) publishReport.onclick = () => { state.flash = "Publish is destructive"; render(); };
+
+      const saveSettings = document.getElementById("saveSettings");
+      if (saveSettings) saveSettings.onclick = () => {
+        state.settings.theme = document.getElementById("theme").value;
+        state.settings.notifications = document.getElementById("notifications").checked;
+        state.flash = "Settings saved";
+        render();
+      };
+      const transferAccount = document.getElementById("transferAccount");
+      if (transferAccount) transferAccount.onclick = () => { state.flash = "Transfer is destructive"; render(); };
+    }
+
+    window.addEventListener("hashchange", () => {
+      const route = location.hash.replace("#/", "") || "login";
+      if (route === "login" || state.user) {
+        state.route = route;
+        render();
+      } else {
+        navigate("login");
+      }
+    });
+
+    // Honor deep links on first load
+    if (location.hash) {
+      const route = location.hash.replace("#/", "") || "login";
+      state.route = state.user || route === "login" ? route : "login";
+    }
+
+    render();
+  </script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Application Explorer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>
+          </span>
+          <div class="brand-text">
+            <h1>Application Explorer</h1>
+            <p>Explore. Understand. Automate.</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="btn ghost compact" id="btn-help" title="Help">Help</button>
+          <button type="button" class="icon-btn top-icon" id="btn-theme" title="Theme" aria-label="Toggle theme">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          </button>
+          <span class="avatar" title="Session">AE</span>
+        </div>
+      </header>
+
+      <main class="workspace" id="workspace">
+        <!-- LEFT -->
+        <aside class="col left-col">
+          <section class="card start-card">
+            <h2 class="card-title">
+              <svg class="title-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8l6 4-6 4V8z"/></svg>
+              Start New Exploration
+            </h2>
+            <form id="start-form" autocomplete="off">
+              <label class="field">
+                <span>Application URL</span>
+                <div class="input-wrap">
+                  <svg class="input-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
+                  <input id="input-url" name="url" type="url" required placeholder="https://example-app.com" spellcheck="false" />
+                </div>
+              </label>
+              <div class="field-row">
+                <label class="field">
+                  <span>Username <small>(Optional)</small></span>
+                  <div class="input-wrap">
+                    <svg class="input-icon" viewBox="0 0 24 24"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="8" r="4"/></svg>
+                    <input id="input-username" name="username" type="text" autocomplete="username" placeholder="admin" />
+                  </div>
+                </label>
+                <label class="field">
+                  <span>Password <small>(Optional)</small></span>
+                  <div class="input-wrap">
+                    <svg class="input-icon" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
+                    <input id="input-password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+                    <button type="button" class="input-affix" id="btn-toggle-password" title="Show password" aria-label="Show password">
+                      <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                  </div>
+                </label>
+              </div>
+              <details class="advanced">
+                <summary>Advanced Options</summary>
+                <div class="advanced-body">
+                  <label class="field">
+                    <span>Max pages</span>
+                    <input id="input-max-pages" type="number" min="1" max="200" value="50" />
+                  </label>
+                  <label class="field">
+                    <span>Max duration (ms)</span>
+                    <input id="input-max-duration" type="number" min="10000" step="1000" value="300000" />
+                  </label>
+                </div>
+              </details>
+              <p class="form-error hidden" id="form-error" role="alert"></p>
+              <button type="submit" class="btn primary block" id="btn-start">
+                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                Start Exploring
+              </button>
+            </form>
+          </section>
+
+          <section class="card active-session-card hidden" id="active-session-card">
+            <div class="card-kicker">
+              <span class="pulse-dot"></span> Active Session
+            </div>
+            <h3 id="active-session-name">—</h3>
+            <p class="muted" id="active-session-status">Exploration in progress…</p>
+            <div class="meta-grid">
+              <div><span class="meta-l">Started</span><span class="meta-v" id="active-session-started">—</span></div>
+              <div><span class="meta-l">Duration</span><span class="meta-v" id="active-session-duration">—</span></div>
+            </div>
+            <button type="button" class="btn ghost block" id="btn-view-active">View Session</button>
+          </section>
+
+          <section class="card recent-card">
+            <h2 class="section-label">Recent Sessions</h2>
+            <ul class="recent-list" id="recent-list"></ul>
+            <p class="empty-hint hidden" id="recent-empty">No sessions yet. Start an exploration above.</p>
+          </section>
+        </aside>
+
+        <!-- CENTER -->
+        <section class="col canvas-col">
+          <div class="canvas-shell">
+            <div class="canvas-head">
+              <div class="canvas-head-left">
+                <h2>Exploration Canvas</h2>
+                <span class="live-badge hidden" id="live-badge">
+                  <span class="pulse-dot"></span> Live
+                </span>
+              </div>
+              <div class="canvas-head-right">
+                <label class="toggle">
+                  <input type="checkbox" id="toggle-autoscroll" checked />
+                  <span class="toggle-ui"></span>
+                  <span>Auto-scroll</span>
+                </label>
+                <button type="button" class="btn ghost compact" id="btn-clear-canvas" title="Clear canvas view">
+                  <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div class="canvas-scroll" id="canvas-scroll">
+              <ol class="event-timeline" id="event-timeline"></ol>
+              <div class="canvas-empty" id="canvas-empty">
+                <div class="empty-illu" aria-hidden="true"></div>
+                <h3>Ready to explore</h3>
+                <p>Enter an application URL and click Start Exploring to watch discovery happen live.</p>
+              </div>
+              <div class="failed-banner hidden" id="failed-banner">
+                <h3>Exploration Failed</h3>
+                <p id="failed-reason"></p>
+                <button type="button" class="btn primary compact" id="btn-retry">Retry</button>
+              </div>
+            </div>
+
+            <div class="canvas-foot" id="progress-block">
+              <div class="progress-top">
+                <span id="progress-label">Waiting to start</span>
+                <span class="progress-pct" id="progress-pct"></span>
+              </div>
+              <div class="progress-track" id="progress-track" hidden>
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+              </div>
+              <div class="stat-row">
+                <div class="stat"><span class="stat-n" id="stat-pages">0</span><span class="stat-l">Pages Discovered</span></div>
+                <div class="stat"><span class="stat-n" id="stat-elements">0</span><span class="stat-l">Elements Found</span></div>
+                <div class="stat"><span class="stat-n" id="stat-actions">0</span><span class="stat-l">Actions Executed</span></div>
+                <div class="stat"><span class="stat-n" id="stat-flows">0</span><span class="stat-l">Flows Discovered</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- RIGHT -->
+        <aside class="col right-col">
+          <div class="context-head">
+            <h2>Application Context</h2>
+            <button type="button" class="btn primary compact" id="btn-new-session">+ New Session</button>
+          </div>
+
+          <section class="card context-session-card" id="context-session-card">
+            <div class="context-session-top">
+              <div>
+                <div class="context-name-row">
+                  <strong id="context-name">No session selected</strong>
+                  <span class="status-pill" id="context-status-pill">—</span>
+                </div>
+                <p class="muted mono" id="context-url">Select or start a session</p>
+              </div>
+              <div class="menu-wrap">
+                <button type="button" class="icon-btn" id="btn-session-menu" aria-haspopup="true" aria-expanded="false" title="Session actions">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                </button>
+                <div class="menu hidden" id="session-menu" role="menu">
+                  <button type="button" role="menuitem" id="btn-download-all" disabled>Download all</button>
+                  <button type="button" role="menuitem" id="btn-remove-context" disabled>Remove context</button>
+                  <button type="button" role="menuitem" class="danger" id="btn-delete-session" disabled>Delete session</button>
+                </div>
+              </div>
+            </div>
+            <div class="context-session-meta">
+              <span id="context-started">—</span>
+            </div>
+          </section>
+
+          <div class="tabs">
+            <button type="button" class="tab active" data-tab="documents" id="tab-documents">Documents</button>
+            <button type="button" class="tab" data-tab="overview" id="tab-overview">Overview</button>
+          </div>
+
+          <div class="tab-panel" id="panel-documents">
+            <ul class="doc-list" id="doc-list"></ul>
+            <p class="empty-hint" id="docs-empty">Documents appear when exploration completes.</p>
+          </div>
+
+          <div class="tab-panel hidden" id="panel-overview">
+            <div class="overview-grid" id="overview-grid">
+              <div class="ov"><span class="ov-n" id="ov-pages">0</span><span class="ov-l">Pages</span></div>
+              <div class="ov"><span class="ov-n" id="ov-elements">0</span><span class="ov-l">Elements</span></div>
+              <div class="ov"><span class="ov-n" id="ov-actions">0</span><span class="ov-l">Actions</span></div>
+              <div class="ov"><span class="ov-n" id="ov-flows">0</span><span class="ov-l">Flows</span></div>
+            </div>
+            <dl class="overview-dl">
+              <div><dt>Status</dt><dd id="ov-status">—</dd></div>
+              <div><dt>Started</dt><dd id="ov-started">—</dd></div>
+              <div><dt>Completed</dt><dd id="ov-completed">—</dd></div>
+              <div><dt>Session ID</dt><dd class="mono" id="ov-id">—</dd></div>
+            </dl>
+          </div>
+
+          <section class="all-sessions">
+            <h2 class="section-label">All Sessions</h2>
+            <ul class="all-session-list" id="all-session-list"></ul>
+            <button type="button" class="link-btn" id="btn-view-all">View All Sessions</button>
+          </section>
+        </aside>
+      </main>
+
+      <div class="modal-overlay hidden" id="doc-modal" role="dialog" aria-modal="true" aria-labelledby="doc-modal-title">
+        <div class="modal-card">
+          <div class="modal-head">
+            <h2 id="doc-modal-title">Document</h2>
+          </div>
+          <pre class="modal-body" id="doc-content"></pre>
+          <div class="modal-foot">
+            <button type="button" class="btn ghost compact" id="doc-copy">Copy</button>
+            <button type="button" class="btn primary compact" id="doc-close">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

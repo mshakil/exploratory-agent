@@ -1,13 +1,31 @@
+# Dependencies & build
 node_modules/
 dist/
+*.tsbuildinfo
+
+# Exploration runtime output
 .memory/
 application-context/
 data/
-*.log
+
+# Secrets & local auth
 .env
+.env.*
+!.env.example
 auth.json
 storage-state.json
-.DS_Store
+*.pem
+
+# Logs & test artifacts
+*.log
 coverage/
 test-results/
 playwright-report/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+*.code-workspace

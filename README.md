@@ -4,6 +4,8 @@ Standalone, framework-independent **application reconnaissance agent** for SDETs
 
 It explores an unfamiliar web application, discovers pages, interactive elements, safe workflows, and reliable selector candidates, then writes framework-neutral Markdown and JSON that any coding agent (Cursor, Claude Code, Codex, Antigravity, or a plain terminal) can consume.
 
+Optional framework selection adds Playwright or Selenium Java documentation on top of the same neutral model. Sessions can be resumed to re-explore and detect changes.
+
 > The agent discovers the application. The SDET decides what to automate.
 
 ## Setup
@@ -46,6 +48,18 @@ npx agent-explorer explore \
   --output ./application-context
 ```
 
+## Live UI
+
+`npm run ui` starts a multi-application exploration canvas:
+
+- Enter URL, optional credentials, and framework (Independent, Playwright, Selenium Java)
+- Watch live discovery (pages, elements, actions, flows, ETA)
+- Download `CONTEXT.md`, individual docs, or a full zip
+- Resume a completed session to re-explore and review change reports
+- Dark / light theme (persisted in the browser)
+
+Passwords are never persisted. Framework selection only affects generated documentation.
+
 ## CLI
 
 | Command | Purpose |
@@ -78,23 +92,32 @@ Common options:
 
 ```text
 application-context/
+├── CONTEXT.md              # Entry point for coding agents
+├── AGENTS.md
 ├── application.md
 ├── pages.md
 ├── flows.md
 ├── selectors.md
 ├── application.json
-└── AGENTS.md
+├── framework/              # When a framework is selected
+│   ├── playwright.md
+│   └── selenium-java.md
+└── changes/                # After resume / re-exploration
+    └── exploration-001.md
 ```
 
+`CONTEXT.md` is the parent document — hand this file (or the folder) to a coding agent.  
 `application.json` is the machine-readable source of truth (`schemaVersion: "1.0"`).  
-`AGENTS.md` tells coding agents how to consume the context.
+`AGENTS.md` explains how to consume the context and any framework-specific files.
+
+Sessions from the UI are stored under `data/sessions/` (gitignored), including memory, documents, events, and exploration runs.
 
 ## Coding-agent workflow
 
-1. Ask your coding agent to explore the app.
-2. It runs `agent-explorer explore --url ...`.
-3. It reads `application-context/`.
-4. You ask it to implement automation for a chosen flow.
+1. Ask your coding agent to explore the app (CLI or UI).
+2. It runs `agent-explorer explore --url ...` or starts a UI session.
+3. Point the agent at `CONTEXT.md` (or the full `application-context/` folder).
+4. Ask it to implement automation for a chosen flow, using framework docs when present.
 
 The explorer is **agent-callable**, not agent-dependent.
 
@@ -112,24 +135,27 @@ By default the agent:
 ```text
 src/
 ├── cli/             Commander CLI
-├── explorer/        Exploration loop (+ application-level events)
+├── explorer/        Exploration loop (+ change events)
 ├── browser/         BrowserAdapter + Playwright implementation
 ├── discovery/       Page/element discovery + action classification
 ├── selectors/       Candidate generation and ranking
 ├── state/           State fingerprinting
 ├── graph/           Application graph
 ├── memory/          JSON persistence
-├── sessions/        Multi-app session model + persistence
+├── sessions/        Multi-app sessions, runs, resume
 ├── server/          HTTP + SSE UI server
 ├── flows/           Flow extraction
-├── documentation/   Markdown + JSON generation
+├── changes/         Diff previous vs current context
+├── frameworks/      Playwright / Selenium Java doc generators
+├── documentation/   Markdown + JSON + CONTEXT.md
 ├── ai/              Optional LLM hooks (noop by default)
 └── models/          Domain models (Zod)
 ui/                  Live exploration canvas (static)
 data/sessions/       Persisted multi-app exploration sessions
 ```
 
-Core domain code depends on `BrowserAdapter`, not Playwright directly.
+Core domain code depends on `BrowserAdapter`, not Playwright directly.  
+The application model stays framework-neutral; framework generators only map selectors into docs.
 
 ## Demo application
 
@@ -143,8 +169,8 @@ Login, Dashboard (tabs + modal), Users (table, pagination, create/edit), Reports
 npm test
 ```
 
-Includes unit tests for selectors, state fingerprints, action classification, memory, graph, and documentation, plus an end-to-end exploration against the local demo app.
+Includes unit tests for selectors, state fingerprints, action classification, memory, graph, documentation, change detection, and sessions, plus an end-to-end exploration against the local demo app.
 
 ## Non-goals (V1)
 
-Automated test generation, API/mobile exploration, self-healing, cloud execution, vector/RAG memory, and framework-specific codegen are out of scope.
+Automated test generation, API/mobile exploration, self-healing, cloud execution, and vector/RAG memory are out of scope. Framework generators produce documentation only — they do not emit runnable test suites.

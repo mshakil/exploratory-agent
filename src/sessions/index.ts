@@ -7,6 +7,7 @@ export type {
   ExplorationRun,
   CreateSessionInput,
   ResumeSessionInput,
+  ListSessionsFilter,
   SessionStatistics,
   SessionStatus,
   Framework,

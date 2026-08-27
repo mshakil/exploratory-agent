@@ -16,18 +16,31 @@ npm run setup
 
 This installs dependencies, Playwright Chromium, and builds the CLI.
 
-Or step by step:
+**PostgreSQL is required** for both the UI and CLI (users, sessions, runs, events). Artifacts stay on disk under `AE_DATA_DIR`.
+
+```bash
+npm run db:up          # Docker Compose Postgres 16
+cp .env.example .env   # set DATABASE_URL / AE_SESSION_SECRET
+node scripts/ensure-db.mjs   # create DB if missing
+npm run db:migrate
+```
+
+See [docs/postgres.md](docs/postgres.md) for schema, legacy JSON import, and ops details.
+
+Or step by step without Docker (bring your own Postgres):
 
 ```bash
 npm install
 npx playwright install chromium
+# set DATABASE_URL in .env
+npm run db:migrate
 npm run build
 ```
 
 ## Quick start
 
 ```bash
-# Explore any web app (CLI)
+# Explore any web app (CLI) — creates a Postgres session + artifacts under ./data
 npx agent-explorer explore --url https://example.com --start /dashboard
 
 # Or open the multi-session live UI
@@ -39,48 +52,67 @@ npx serve demo -l 4173
 npx agent-explorer explore --url http://127.0.0.1:4173 --username explorer --password demo
 ```
 
-Authenticated Playwright session:
+Authenticated Playwright session (target app):
 
 ```bash
 npx agent-explorer explore \
   --url https://example.com \
-  --storage-state ./auth.json \
-  --output ./application-context
+  --storage-state ./auth.json
 ```
 
 ## Live UI
 
-`npm run ui` starts a multi-application exploration canvas:
+`npm run ui` starts a multi-user, multi-application exploration canvas:
 
-- Enter URL, optional credentials, and framework (Independent, Playwright, Selenium Java)
-- Watch live discovery (pages, elements, actions, flows, ETA)
-- Open the **Graph** tab to inspect the application state graph (pages + transitions), with zoom and page details
+- **Sign in / register** — each explorer account owns its sessions; multiple users can run explorations in parallel
+- Enter URL, optional target-app credentials, stability profile, and framework (Independent, Playwright, Selenium Java)
+- Watch live discovery (pages, elements, actions, flows, skip reasons, ETA)
+- Pause / resume / stop; delete session or remove generated context
 - Download `CONTEXT.md`, individual docs, or a full zip
 - Resume a completed session to re-explore and review change reports
-- Dark / light theme (persisted in the browser)
+- Dark / light theme (icon toggle; persisted in the browser)
 
-Passwords are never persisted. Framework selection only affects generated documentation.
+Passwords for **target apps** are never persisted. Explorer account passwords are stored as scrypt hashes in Postgres (`users` table).
 
-After changing server code, restart `npm run ui` so new API routes (such as `/api/sessions/:id/graph`) are loaded.
+### Multi-user / LAN
+
+```bash
+# Bind for LAN access (default is 127.0.0.1)
+npm run ui -- --host 0.0.0.0 --port 3847
+```
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | **Required.** Postgres connection string |
+| `AE_DATA_DIR` | Artifact root for memory + application-context (default `./data`) |
+| `AE_SESSION_SECRET` | HMAC secret for login cookies (≥16 chars; required in production) |
+| `AE_COOKIE_SECURE=1` | Force `Secure` cookie flag (use behind HTTPS) |
+| `AE_CORS_ORIGIN` | Allowed browser Origin for credentialed CORS (optional) |
+| `AE_CLI_USER_ID` | Optional owner user id for CLI explores (else auto-created `cli` user) |
+| `AZURE_AD_*` / `AE_PUBLIC_BASE_URL` | Reserved for Azure AD SSO (routes stubbed until implemented) |
+
+The first registered account becomes **admin** and can see all sessions. Regular users only see their own.
+
+After changing server code, restart `npm run ui` so new API routes are loaded.
 
 ## CLI
 
 | Command | Purpose |
 |---|---|
-| `agent-explorer explore` | Start exploration |
+| `agent-explorer explore` | Start exploration (Postgres session) |
 | `agent-explorer ui` | Multi-session live exploration UI |
-| `agent-explorer resume` | Continue from `.memory/` |
-| `agent-explorer status` | Show exploration progress |
-| `agent-explorer report` | Regenerate docs from memory |
-| `agent-explorer inspect` | Inspect discovered pages/elements |
+| `agent-explorer resume --session <id>` | Re-explore an existing session |
+| `agent-explorer status [--session <id>]` | List sessions or show one |
+| `agent-explorer report --session <id>` | Regenerate docs from session memory |
+| `agent-explorer inspect --session <id>` | Inspect discovered pages/elements |
 
 Common options:
 
 ```text
 --url <url>                 Application URL (required for explore)
---start <path>              Starting path
---output <dir>              Default: ./application-context
---memory <dir>              Default: ./.memory
+--start <path>              Starting path (merged into URL)
+--data <dir>                Artifact directory (default: AE_DATA_DIR or ./data)
+--session <id>              Session id (resume / status / report / inspect)
 --storage-state <file>      Playwright storage state
 --username / --password     Simple credential login
 --max-pages <n>             Default: 50
@@ -93,89 +125,47 @@ Common options:
 
 ## Output
 
+Hybrid storage — metadata in Postgres, artifacts on disk:
+
 ```text
-application-context/
-├── CONTEXT.md              # Entry point for coding agents
-├── AGENTS.md
-├── application.md
-├── pages.md
-├── flows.md
-├── selectors.md
-├── application.json
-├── framework/              # When a framework is selected
-│   ├── playwright.md
-│   └── selenium-java.md
-└── changes/                # After resume / re-exploration
-    └── exploration-001.md
+data/sessions/<session-id>/
+├── memory/                 # Crawl snapshot (JSON)
+└── application-context/
+    ├── CONTEXT.md          # Entry point for coding agents
+    ├── AGENTS.md
+    ├── application.md
+    ├── pages.md
+    ├── flows.md
+    ├── selectors.md
+    ├── application.json
+    ├── framework/          # Optional framework-specific docs
+    └── changes/            # Resume change reports
 ```
 
-`CONTEXT.md` is the parent document — hand this file (or the folder) to a coding agent.  
-`application.json` is the machine-readable source of truth (`schemaVersion: "1.0"`).  
-`AGENTS.md` explains how to consume the context and any framework-specific files.
-
-Sessions from the UI are stored under `data/sessions/` (gitignored), including memory, documents, events, and exploration runs.
-
-## Coding-agent workflow
-
-1. Ask your coding agent to explore the app (CLI or UI).
-2. It runs `agent-explorer explore --url ...` or starts a UI session.
-3. Point the agent at `CONTEXT.md` (or the full `application-context/` folder).
-4. Ask it to implement automation for a chosen flow, using framework docs when present.
-
-The explorer is **agent-callable**, not agent-dependent.
+Hand `CONTEXT.md` (or the folder) to a coding agent. Metadata (users, sessions, runs, events) lives in PostgreSQL — not in `session.json` / `events.json`.
 
 ## Safety
 
 By default the agent:
 
 - Executes **safe** actions (navigation, tabs, filters, form fills with synthetic data, etc.)
-- **Skips** destructive actions (delete, publish, logout, transfer, purchase, …)
+- **Skips** destructive actions (delete, publish, logout, transfer, purchase, …) and records skip reasons
 - Continues after individual interaction failures
 - Masks credentials/secrets in logs and generated output
 
-## Architecture
+## Hardening
 
-```text
-src/
-├── cli/             Commander CLI
-├── explorer/        Exploration loop (+ change events)
-├── browser/         BrowserAdapter + Playwright implementation
-├── discovery/       Page/element discovery + action classification
-├── selectors/       Candidate generation and ranking
-├── state/           State fingerprinting
-├── graph/           Application graph (pages + transitions)
-├── memory/          JSON persistence
-├── sessions/        Multi-app sessions, runs, resume (+ graph API)
-├── server/          HTTP + SSE UI server
-├── flows/           Flow extraction
-├── changes/         Diff previous vs current context
-├── frameworks/      Playwright / Selenium Java doc generators
-├── documentation/   Markdown + JSON + CONTEXT.md
-├── ai/              Optional LLM hooks (noop by default)
-└── models/          Domain models (Zod)
-ui/                  Live exploration canvas (static; includes Graph tab)
-data/sessions/       Persisted multi-app exploration sessions
-```
+See [docs/hardening-real-apps.md](docs/hardening-real-apps.md) for stability profiles, skip reasons, consent dismissal, and target-app auth modes (`credentials` / `storage-state` / `manual-wait`). Explorer-user login is separate — see [docs/postgres.md](docs/postgres.md).
 
-The in-memory `ApplicationGraph` stores discovered UI states as nodes and state-changing actions as edges. The UI Graph tab reads the same data from session memory (with a fallback to `application.json`).
-
-Core domain code depends on `BrowserAdapter`, not Playwright directly.  
-The application model stays framework-neutral; framework generators only map selectors into docs.
-
-## Demo application
-
-`demo/index.html` is a small CRM used for integration tests:
-
-Login, Dashboard (tabs + modal), Users (table, pagination, create/edit), Reports, Settings, safe and destructive actions.
+UI mockup reference: [docs/hardening-ui-final-mockup.html](docs/hardening-ui-final-mockup.html).
 
 ## Tests
 
 ```bash
+# Requires DATABASE_URL (Postgres tests skip if unreachable)
 npm test
 ```
 
-Includes unit tests for selectors, state fingerprints, action classification, memory, graph, documentation, change detection, and sessions, plus an end-to-end exploration against the local demo app.
+## License
 
-## Non-goals (V1)
-
-Automated test generation, API/mobile exploration, self-healing, cloud execution, and vector/RAG memory are out of scope. Framework generators produce documentation only — they do not emit runnable test suites.
+MIT

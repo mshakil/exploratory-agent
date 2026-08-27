@@ -2,6 +2,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnvFile } from "../db/load-env.js";
+import { closeDb, migrate, requireDatabaseUrl } from "../db/index.js";
+import { AuthService, toPublicUser, type User } from "../auth/index.js";
 import { SessionManager } from "../sessions/index.js";
 import type { ExplorationEvent, ExplorationSession } from "../sessions/types.js";
 import { createZipBuffer } from "./zip.js";
@@ -24,19 +27,27 @@ export async function startUiServer(opts: ServeOptions = {}): Promise<{
   host: string;
   close: () => Promise<void>;
 }> {
+  await loadEnvFile();
+  requireDatabaseUrl();
+  await migrate();
+
   const port = opts.port ?? 3847;
   const host = opts.host ?? "127.0.0.1";
-  const dataDir = path.resolve(opts.dataDir ?? "./data");
+  const dataDir = path.resolve(
+    opts.dataDir ?? process.env.AE_DATA_DIR ?? "./data",
+  );
   const uiRoot = resolveUiRoot();
   const manager = new SessionManager(dataDir);
+  const auth = new AuthService();
+  await auth.init();
 
   const server = createServer(async (req, res) => {
     try {
-      await handleRequest(req, res, manager, uiRoot);
+      await handleRequest(req, res, manager, auth, uiRoot);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (!res.headersSent) {
-        json(res, 500, { error: message });
+        json(req, res, 500, { error: message });
       } else {
         res.end();
       }
@@ -53,7 +64,11 @@ export async function startUiServer(opts: ServeOptions = {}): Promise<{
     host,
     close: () =>
       new Promise((resolve, reject) => {
-        server.close((err) => (err ? reject(err) : resolve()));
+        server.close(async (err) => {
+          await closeDb().catch(() => undefined);
+          if (err) reject(err);
+          else resolve();
+        });
       }),
   };
 }
@@ -62,6 +77,7 @@ async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   manager: SessionManager,
+  auth: AuthService,
   uiRoot: string,
 ): Promise<void> {
   const method = req.method || "GET";
@@ -69,249 +85,355 @@ async function handleRequest(
   const pathname = url.pathname;
 
   if (method === "OPTIONS") {
-    cors(res);
+    cors(req, res);
     res.writeHead(204);
     res.end();
     return;
   }
 
-  // --- API ---
+  // --- Public API ---
   if (pathname === "/api/health") {
-    json(res, 200, { ok: true });
+    json(req, res, 200, { ok: true });
     return;
   }
 
-  if (pathname === "/api/sessions" && method === "GET") {
-    const sessions = await manager.listSessions();
-    json(res, 200, { sessions });
+  if (pathname === "/api/auth/providers" && method === "GET") {
+    json(req, res, 200, { providers: auth.listProviders() });
     return;
   }
 
-  if (pathname === "/api/sessions" && method === "POST") {
-    const body = await readJsonBody<{
-      url?: string;
-      username?: string;
-      password?: string;
-      framework?: string;
-      headless?: boolean;
-      maxPages?: number;
-      maxDepth?: number;
-      maxDurationMs?: number;
-    }>(req);
-
-    if (!body.url || typeof body.url !== "string") {
-      json(res, 400, { error: "url is required" });
+  if (pathname === "/api/auth/me" && method === "GET") {
+    const me = await auth.me(req);
+    if (!me) {
+      json(req, res, 401, { error: "Not authenticated" });
       return;
     }
+    json(req, res, 200, { user: me });
+    return;
+  }
 
+  if (pathname === "/api/auth/register" && method === "POST") {
+    const body = await readJsonBody<{ username?: string; password?: string }>(req);
     try {
-      const session = await manager.startExploration({
-        applicationUrl: body.url,
-        username: body.username,
-        password: body.password,
-        framework: body.framework as import("../sessions/types.js").Framework | undefined,
-        headless: body.headless !== false,
-        maxPages: body.maxPages,
-        maxDepth: body.maxDepth,
-        maxDurationMs: body.maxDurationMs,
-      });
-      json(res, 201, { session });
+      if (!body.username || !body.password) {
+        json(req, res, 400, { error: "username and password are required" });
+        return;
+      }
+      const user = await auth.register(body.username, body.password);
+      setAuthCookie(req, res, auth, user.id);
+      json(req, res, 201, { user: toPublicUser(user) });
     } catch (err) {
-      json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
 
-  const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)(.*)$/);
-  if (sessionMatch) {
-    const sessionId = decodeURIComponent(sessionMatch[1]!);
-    const rest = sessionMatch[2] || "";
-
-    if (rest === "" && method === "GET") {
-      const session = await manager.getSession(sessionId);
-      if (!session) {
-        json(res, 404, { error: "Session not found" });
+  if (pathname === "/api/auth/login" && method === "POST") {
+    const body = await readJsonBody<{ username?: string; password?: string }>(req);
+    try {
+      if (!body.username || !body.password) {
+        json(req, res, 400, { error: "username and password are required" });
         return;
       }
-      json(res, 200, { session });
-      return;
+      const user = await auth.login(body.username, body.password);
+      setAuthCookie(req, res, auth, user.id);
+      json(req, res, 200, { user: toPublicUser(user) });
+    } catch (err) {
+      json(req, res, 401, { error: err instanceof Error ? err.message : String(err) });
     }
+    return;
+  }
 
-    if (rest === "/events" && method === "GET") {
-      const events = await manager.getEvents(sessionId);
-      json(res, 200, { events });
-      return;
-    }
+  if (pathname === "/api/auth/logout" && method === "POST") {
+    res.setHeader("Set-Cookie", auth.clearCookie(isSecureRequest(req)));
+    json(req, res, 200, { ok: true });
+    return;
+  }
 
-    if (rest === "/events/stream" && method === "GET") {
-      await streamSessionEvents(req, res, manager, sessionId);
-      return;
-    }
-
-    if (rest === "/documents" && method === "GET") {
-      const session = await manager.getSession(sessionId);
-      if (!session) {
-        json(res, 404, { error: "Session not found" });
-        return;
-      }
-      const documents = await manager.listDocuments(sessionId);
-      json(res, 200, { documents });
-      return;
-    }
-
-    if (rest === "/documents/download-all" && method === "GET") {
-      const session = await manager.getSession(sessionId);
-      if (!session) {
-        json(res, 404, { error: "Session not found" });
-        return;
-      }
-      const documents = await manager.listDocuments(sessionId);
-      const entries = [];
-      for (const doc of documents) {
-        if (!doc.available) continue;
-        const content = await manager.getStore().readDocument(sessionId, doc.name);
-        if (content !== null) entries.push({ name: doc.name, content });
-      }
-      if (entries.length === 0) {
-        json(res, 404, { error: "No documents available to download" });
-        return;
-      }
-      const zip = createZipBuffer(entries);
-      const zipName = `${sanitizeFilename(session.applicationName)}-context.zip`;
-      cors(res);
-      res.writeHead(200, {
-        "Content-Type": "application/zip",
-        "Content-Length": zip.length,
-        "Content-Disposition": `attachment; filename="${zipName}"`,
+  if (pathname === "/api/auth/azure/start" && method === "GET") {
+    if (!auth.azure.isConfigured()) {
+      json(req, res, 501, {
+        error: "Azure AD is not configured. Set AZURE_AD_TENANT_ID, AZURE_AD_CLIENT_ID, AZURE_AD_CLIENT_SECRET, and AE_PUBLIC_BASE_URL.",
       });
-      res.end(zip);
+      return;
+    }
+    try {
+      auth.azure.getAuthorizeUrl("pending");
+      json(req, res, 501, { error: "Azure AD sign-in is not implemented yet" });
+    } catch (err) {
+      json(req, res, 501, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  if (pathname === "/api/auth/azure/callback" && method === "GET") {
+    json(req, res, 501, { error: "Azure AD sign-in is not implemented yet" });
+    return;
+  }
+
+  // --- Protected session API ---
+  if (pathname.startsWith("/api/sessions")) {
+    const user = await auth.requireUser(req);
+    if (!user) {
+      json(req, res, 401, { error: "Not authenticated" });
       return;
     }
 
-    const docMatch = rest.match(/^\/documents\/(.+)$/);
-    if (docMatch && method === "GET" && !rest.includes("download-all")) {
-      const name = decodeURIComponent(docMatch[1]!);
-      if (name.includes("..") || name.startsWith("/") || name.startsWith("\\")) {
-        json(res, 400, { error: "Invalid document name" });
-        return;
-      }
-      const content = await manager.getStore().readDocument(sessionId, name);
-      if (content === null) {
-        json(res, 404, { error: "Document not found" });
-        return;
-      }
-      const download = url.searchParams.get("download") === "1";
-      const contentType = name.endsWith(".json")
-        ? "application/json; charset=utf-8"
-        : "text/markdown; charset=utf-8";
-      cors(res);
-      res.writeHead(200, {
-        "Content-Type": contentType,
-        ...(download
-          ? { "Content-Disposition": `attachment; filename="${path.basename(name)}"` }
-          : {}),
-      });
-      res.end(content);
+    if (pathname === "/api/sessions" && method === "GET") {
+      const sessions = await manager.listSessions(
+        user.role === "admin" ? { admin: true } : { ownerUserId: user.id },
+      );
+      json(req, res, 200, { sessions });
       return;
     }
 
-    if (rest === "/runs" && method === "GET") {
-      const session = await manager.getSession(sessionId);
-      if (!session) {
-        json(res, 404, { error: "Session not found" });
-        return;
-      }
-      const runs = await manager.listRuns(sessionId);
-      json(res, 200, { runs });
-      return;
-    }
-
-    if (rest === "/graph" && method === "GET") {
-      const session = await manager.getSession(sessionId);
-      if (!session) {
-        json(res, 404, { error: "Session not found" });
-        return;
-      }
-      const graph = await manager.getGraph(sessionId);
-      json(res, 200, graph);
-      return;
-    }
-
-    if (rest === "/resume" && method === "POST") {
+    if (pathname === "/api/sessions" && method === "POST") {
       const body = await readJsonBody<{
+        url?: string;
+        username?: string;
         password?: string;
+        framework?: string;
         headless?: boolean;
         maxPages?: number;
+        maxDepth?: number;
         maxDurationMs?: number;
+        stabilityProfile?: string;
+        authMode?: string;
+        storageState?: string;
+        domainAllowlist?: string[];
+        exploreOpenShadow?: boolean;
+        exploreSameOriginFrames?: boolean;
+        dismissConsent?: boolean;
       }>(req);
+
+      if (!body.url || typeof body.url !== "string") {
+        json(req, res, 400, { error: "url is required" });
+        return;
+      }
+
       try {
-        const session = await manager.resumeExploration(sessionId, body);
-        json(res, 200, { session });
+        const session = await manager.startExploration({
+          applicationUrl: body.url,
+          ownerUserId: user.id,
+          username: body.username,
+          password: body.password,
+          framework: body.framework as import("../sessions/types.js").Framework | undefined,
+          headless: body.headless !== false,
+          maxPages: body.maxPages,
+          maxDepth: body.maxDepth,
+          maxDurationMs: body.maxDurationMs,
+          stabilityProfile: body.stabilityProfile as
+            | "fast"
+            | "balanced"
+            | "deep"
+            | undefined,
+          authMode: body.authMode as
+            | "none"
+            | "credentials"
+            | "storage-state"
+            | "manual-wait"
+            | undefined,
+          storageState: body.storageState,
+          domainAllowlist: body.domainAllowlist,
+          exploreOpenShadow: body.exploreOpenShadow,
+          exploreSameOriginFrames: body.exploreSameOriginFrames,
+          dismissConsent: body.dismissConsent,
+        });
+        json(req, res, 201, { session });
       } catch (err) {
-        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
       }
       return;
     }
 
-    if (rest === "/stop" && method === "POST") {
-      try {
-        const session = await manager.stopExploration(sessionId);
-        json(res, 200, { session });
-      } catch (err) {
-        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+    const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)(.*)$/);
+    if (sessionMatch) {
+      const sessionId = decodeURIComponent(sessionMatch[1]!);
+      const rest = sessionMatch[2] || "";
+
+      const owned = await requireOwnedSession(req, res, manager, auth, user, sessionId);
+      if (!owned) return;
+
+      if (rest === "" && method === "GET") {
+        json(req, res, 200, { session: owned });
+        return;
       }
-      return;
+
+      if (rest === "/events" && method === "GET") {
+        const events = await manager.getEvents(sessionId);
+        json(req, res, 200, { events });
+        return;
+      }
+
+      if (rest === "/events/stream" && method === "GET") {
+        await streamSessionEvents(req, res, manager, sessionId, owned);
+        return;
+      }
+
+      if (rest === "/documents" && method === "GET") {
+        const documents = await manager.listDocuments(sessionId);
+        json(req, res, 200, { documents });
+        return;
+      }
+
+      if (rest === "/documents/download-all" && method === "GET") {
+        const documents = await manager.listDocuments(sessionId);
+        const entries = [];
+        for (const doc of documents) {
+          if (!doc.available) continue;
+          const content = await manager.getStore().readDocument(sessionId, doc.name);
+          if (content !== null) entries.push({ name: doc.name, content });
+        }
+        if (entries.length === 0) {
+          json(req, res, 404, { error: "No documents available to download" });
+          return;
+        }
+        const zip = createZipBuffer(entries);
+        const zipName = `${sanitizeFilename(owned.applicationName)}-context.zip`;
+        cors(req, res);
+        res.writeHead(200, {
+          "Content-Type": "application/zip",
+          "Content-Length": zip.length,
+          "Content-Disposition": `attachment; filename="${zipName}"`,
+        });
+        res.end(zip);
+        return;
+      }
+
+      const docMatch = rest.match(/^\/documents\/(.+)$/);
+      if (docMatch && method === "GET" && !rest.includes("download-all")) {
+        const name = decodeURIComponent(docMatch[1]!);
+        if (name.includes("..") || name.startsWith("/") || name.startsWith("\\")) {
+          json(req, res, 400, { error: "Invalid document name" });
+          return;
+        }
+        const content = await manager.getStore().readDocument(sessionId, name);
+        if (content === null) {
+          json(req, res, 404, { error: "Document not found" });
+          return;
+        }
+        const download = url.searchParams.get("download") === "1";
+        const contentType = name.endsWith(".json")
+          ? "application/json; charset=utf-8"
+          : "text/markdown; charset=utf-8";
+        cors(req, res);
+        res.writeHead(200, {
+          "Content-Type": contentType,
+          ...(download
+            ? { "Content-Disposition": `attachment; filename="${path.basename(name)}"` }
+            : {}),
+        });
+        res.end(content);
+        return;
+      }
+
+      if (rest === "/runs" && method === "GET") {
+        const runs = await manager.listRuns(sessionId);
+        json(req, res, 200, { runs });
+        return;
+      }
+
+      if (rest === "/graph" && method === "GET") {
+        const graph = await manager.getGraph(sessionId);
+        json(req, res, 200, graph);
+        return;
+      }
+
+      if (rest === "/resume" && method === "POST") {
+        const body = await readJsonBody<{
+          password?: string;
+          headless?: boolean;
+          maxPages?: number;
+          maxDurationMs?: number;
+        }>(req);
+        try {
+          const session = await manager.resumeExploration(sessionId, body);
+          json(req, res, 200, { session });
+        } catch (err) {
+          json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      if (rest === "/stop" && method === "POST") {
+        try {
+          const session = await manager.stopExploration(sessionId);
+          json(req, res, 200, { session });
+        } catch (err) {
+          json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      if (rest === "/pause" && method === "POST") {
+        try {
+          const session = await manager.pauseExploration(sessionId);
+          json(req, res, 200, { session });
+        } catch (err) {
+          json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      if (rest === "/retry" && method === "POST") {
+        const body = await readJsonBody<{ password?: string }>(req);
+        try {
+          const session = await manager.retrySession(sessionId, body.password);
+          json(req, res, 201, { session });
+        } catch (err) {
+          json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      if (rest === "/context" && method === "DELETE") {
+        try {
+          const result = await manager.removeContext(sessionId);
+          json(req, res, 200, result);
+        } catch (err) {
+          json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      if (rest === "" && method === "DELETE") {
+        try {
+          await manager.deleteSession(sessionId);
+          json(req, res, 200, { deleted: true, id: sessionId });
+        } catch (err) {
+          json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
     }
 
-    if (rest === "/pause" && method === "POST") {
-      try {
-        const session = await manager.pauseExploration(sessionId);
-        json(res, 200, { session });
-      } catch (err) {
-        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
-    if (rest === "/retry" && method === "POST") {
-      const body = await readJsonBody<{ password?: string }>(req);
-      try {
-        const session = await manager.retrySession(sessionId, body.password);
-        json(res, 201, { session });
-      } catch (err) {
-        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
-    if (rest === "/context" && method === "DELETE") {
-      try {
-        const result = await manager.removeContext(sessionId);
-        json(res, 200, result);
-      } catch (err) {
-        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
-
-    if (rest === "" && method === "DELETE") {
-      try {
-        await manager.deleteSession(sessionId);
-        json(res, 200, { deleted: true, id: sessionId });
-      } catch (err) {
-        json(res, 400, { error: err instanceof Error ? err.message : String(err) });
-      }
-      return;
-    }
+    json(req, res, 404, { error: "Not found" });
+    return;
   }
 
   // --- Static UI ---
   if (method === "GET") {
-    await serveStatic(res, uiRoot, pathname);
+    await serveStatic(req, res, uiRoot, pathname);
     return;
   }
 
-  json(res, 405, { error: "Method not allowed" });
+  json(req, res, 405, { error: "Method not allowed" });
+}
+
+async function requireOwnedSession(
+  req: IncomingMessage,
+  res: ServerResponse,
+  manager: SessionManager,
+  auth: AuthService,
+  user: User,
+  sessionId: string,
+): Promise<ExplorationSession | null> {
+  const session = await manager.getSession(sessionId);
+  if (!session || !auth.canAccessSession(user, session)) {
+    json(req, res, 404, { error: "Session not found" });
+    return null;
+  }
+  return session;
 }
 
 async function streamSessionEvents(
@@ -319,14 +441,9 @@ async function streamSessionEvents(
   res: ServerResponse,
   manager: SessionManager,
   sessionId: string,
+  session: ExplorationSession,
 ): Promise<void> {
-  const session = await manager.getSession(sessionId);
-  if (!session) {
-    json(res, 404, { error: "Session not found" });
-    return;
-  }
-
-  cors(res);
+  cors(req, res);
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -339,7 +456,6 @@ async function streamSessionEvents(
     res.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  // Replay history then live updates
   const history = await manager.getEvents(sessionId);
   send("snapshot", { session, events: history });
 
@@ -365,39 +481,39 @@ async function streamSessionEvents(
 }
 
 async function serveStatic(
+  req: IncomingMessage,
   res: ServerResponse,
   uiRoot: string,
   pathname: string,
 ): Promise<void> {
   let rel = pathname === "/" ? "/index.html" : pathname;
   if (rel.includes("..")) {
-    json(res, 400, { error: "Invalid path" });
+    json(req, res, 400, { error: "Invalid path" });
     return;
   }
 
   const filePath = path.join(uiRoot, rel);
   if (!filePath.startsWith(uiRoot)) {
-    json(res, 400, { error: "Invalid path" });
+    json(req, res, 400, { error: "Invalid path" });
     return;
   }
 
   try {
     const content = await readFile(filePath);
-    cors(res);
+    cors(req, res);
     res.writeHead(200, {
       "Content-Type": contentTypeFor(filePath),
       "Cache-Control": "no-cache",
     });
     res.end(content);
   } catch {
-    // SPA fallback
     try {
       const index = await readFile(path.join(uiRoot, "index.html"));
-      cors(res);
+      cors(req, res);
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(index);
     } catch {
-      json(res, 404, { error: "UI assets not found. Ensure the ui/ folder exists." });
+      json(req, res, 404, { error: "UI assets not found. Ensure the ui/ folder exists." });
     }
   }
 }
@@ -422,14 +538,59 @@ function contentTypeFor(filePath: string): string {
   }
 }
 
-function cors(res: ServerResponse): void {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+function isSecureRequest(req: IncomingMessage): boolean {
+  const proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0]?.trim();
+  if (proto === "https") return true;
+  // Node http server has no req.secure; treat localhost as non-secure by default.
+  return false;
 }
 
-function json(res: ServerResponse, status: number, body: unknown): void {
-  cors(res);
+function setAuthCookie(
+  req: IncomingMessage,
+  res: ServerResponse,
+  auth: AuthService,
+  userId: string,
+): void {
+  res.setHeader("Set-Cookie", auth.mintCookie(userId, isSecureRequest(req)));
+}
+
+function cors(req: IncomingMessage, res: ServerResponse): void {
+  const configured = process.env.AE_CORS_ORIGIN?.trim();
+  const origin = req.headers.origin;
+  if (configured) {
+    if (origin && (configured === "*" || configured === origin)) {
+      res.setHeader("Access-Control-Allow-Origin", configured === "*" ? origin : configured);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Vary", "Origin");
+    }
+  } else if (origin) {
+    // Same-host browsers sending Origin: reflect only when host matches request Host.
+    const host = req.headers.host;
+    try {
+      const o = new URL(origin);
+      if (host && o.host === host) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+        res.setHeader("Vary", "Origin");
+      }
+    } catch {
+      // ignore bad origin
+    }
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type",
+  );
+}
+
+function json(
+  req: IncomingMessage,
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+): void {
+  cors(req, res);
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",

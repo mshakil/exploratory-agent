@@ -41,10 +41,10 @@ export function inferElementType(snapshot: ElementSnapshot): ElementType {
   if (type === "checkbox" || role === "checkbox") return "checkbox";
   if (type === "radio" || role === "radio") return "radio";
   if (tag === "textarea") return "textarea";
-  if (tag === "input") return "input";
-  if (tag === "a" || role === "link") return "link";
   if (tag === "button" || role === "button" || type === "submit" || type === "button") return "button";
   if (attrs["role"] === "button") return "button";
+  if (tag === "input") return "input";
+  if (tag === "a" || role === "link") return "link";
   return "other";
 }
 

@@ -23,6 +23,8 @@ import type {
   ExploreOptions,
   ExplorationMeta,
   Page,
+  SkipReasonCode,
+  StabilityProfile,
 } from "../models/index.js";
 import { DEFAULT_TEST_DATA, ApplicationContextSchema } from "../models/index.js";
 import type { ExplorationEventPayload, RunStatistics } from "../sessions/types.js";
@@ -274,7 +276,8 @@ export class Explorer {
         }
       }
 
-      meta = this.buildMeta(meta.startedAt, "completed");
+      const aborted = this.options.shouldAbort?.() === true;
+      meta = this.buildMeta(meta.startedAt, aborted ? "interrupted" : "completed");
       await this.persist(meta);
 
       const flows = extractFlows({
@@ -330,12 +333,13 @@ export class Explorer {
         framework: this.options.framework ?? "independent",
         applicationName: this.options.applicationName ?? context.application.name,
         applicationUrl: this.options.url,
-        status: "completed",
+        status: aborted ? "interrupted" : "completed",
         statistics: {
           pages: meta.pagesDiscovered,
           elements: meta.elementsDiscovered,
           actions: this.actions.filter((a) => a.status === "EXECUTED").length,
           flows: flows.length,
+          skipped: meta.skippedActions,
         },
         runs: this.options.explorationRuns ?? [],
         changeReport,
@@ -343,19 +347,22 @@ export class Explorer {
       });
       await this.persist({ ...meta, flowsDiscovered: flows.length });
 
-      this.emit({
-        type: "exploration_completed",
-        title: "Exploration Completed",
-        description: "Exploration completed successfully",
-        status: "success",
-        statistics: {
-          pages: meta.pagesDiscovered,
-          elements: meta.elementsDiscovered,
-          actions: this.actions.filter((a) => a.status === "EXECUTED").length,
-          flows: flows.length,
-        },
-        metadata: runStatistics ? { changes: runStatistics } : undefined,
-      });
+      if (!aborted) {
+        this.emit({
+          type: "exploration_completed",
+          title: "Exploration Completed",
+          description: "Exploration completed successfully",
+          status: "success",
+          statistics: {
+            pages: meta.pagesDiscovered,
+            elements: meta.elementsDiscovered,
+            actions: this.actions.filter((a) => a.status === "EXECUTED").length,
+            flows: flows.length,
+            skipped: meta.skippedActions,
+          },
+          metadata: runStatistics ? { changes: runStatistics } : undefined,
+        });
+      }
 
       this.logger.summary(meta, outputFiles);
       return {
@@ -410,7 +417,7 @@ export class Explorer {
       return;
     }
 
-    await this.browser.waitForStability();
+    await this.browser.waitForStability(undefined, this.stabilityProfile());
     const state = await this.safeGetState();
     if (!state) {
       this.logger.log(`[FAIL] Could not read page state after navigation`);
@@ -493,6 +500,10 @@ export class Explorer {
     );
 
     for (const plan of planned) {
+      if (this.options.shouldAbort?.()) {
+        this.logger.log(`[BLOCKED] Exploration aborted by user`);
+        break;
+      }
       if (Date.now() > params.deadline) break;
       if (actionsOnPage >= boundaries.maxActionsPerPage) break;
       if (this.totalActions >= this.maxTotalActions) {
@@ -514,19 +525,28 @@ export class Explorer {
           plan.element.name.toLowerCase().includes(x.toLowerCase()),
         )
       ) {
-        this.recordAction(plan, page, "SKIPPED", "excluded by configuration");
+        this.recordAction(plan, page, "SKIPPED", "excluded by configuration", "unknown", undefined, "outside-allowlist");
+        this.emit({
+          type: "action_skipped",
+          title: `Skipped ${plan.element.name}`,
+          description: "Excluded by configuration",
+          status: "skipped",
+          metadata: { element: plan.element.name, skipReason: "outside-allowlist" },
+          statistics: { skipped: this.actions.filter((a) => a.status === "SKIPPED").length },
+        });
         continue;
       }
 
       if (safety === "destructive") {
         this.logger.log(`[SKIP] ${plan.element.name} → destructive action`);
-        this.recordAction(plan, page, "SKIPPED", "destructive action", safety);
+        this.recordAction(plan, page, "SKIPPED", "destructive action", safety, undefined, "destructive");
         this.emit({
           type: "action_skipped",
-          title: `Skipping ${plan.element.name}`,
+          title: `Skipped ${plan.element.name}`,
           description: "Destructive action",
           status: "skipped",
-          metadata: { element: plan.element.name, reason: "destructive" },
+          metadata: { element: plan.element.name, skipReason: "destructive", reason: "destructive" },
+          statistics: { skipped: this.actions.filter((a) => a.status === "SKIPPED").length },
         });
         continue;
       }
@@ -536,10 +556,11 @@ export class Explorer {
         this.recordAction(plan, page, "SKIPPED", "unknown safety", safety);
         this.emit({
           type: "action_skipped",
-          title: `Skipping ${plan.element.name}`,
+          title: `Skipped ${plan.element.name}`,
           description: "Unknown safety",
           status: "skipped",
           metadata: { element: plan.element.name, reason: "unknown safety" },
+          statistics: { skipped: this.actions.filter((a) => a.status === "SKIPPED").length },
         });
         continue;
       }
@@ -689,6 +710,11 @@ export class Explorer {
             reachedBy: { action: plan.type, element: plan.element.name },
             deadline: params.deadline,
           });
+        }
+
+        if (this.options.shouldAbort?.()) {
+          this.logger.log(`[BLOCKED] Exploration aborted by user`);
+          break;
         }
 
         // Return to parent state when possible
@@ -851,6 +877,7 @@ export class Explorer {
     reason?: string,
     safety: Action["safety"] = "safe",
     resultingStateId?: string,
+    skipReason?: SkipReasonCode,
   ): void {
     this.actions.push({
       id: `${page.id}:${slugify(plan.element.name)}:${this.actions.length}`,
@@ -862,15 +889,20 @@ export class Explorer {
       status,
       value: plan.value,
       reason,
+      skipReason,
       resultingStateId,
       timestamp: new Date().toISOString(),
     });
   }
 
+  private stabilityProfile(): StabilityProfile {
+    return this.options.boundaries.stabilityProfile ?? "balanced";
+  }
+
   private async safeGetState() {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        await this.browser.waitForStability();
+        await this.browser.waitForStability(undefined, this.stabilityProfile());
         return await this.browser.getState();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -985,7 +1017,7 @@ export class Explorer {
               status: "running",
             });
             await this.browser.click(toElementReference(submitEl.selectors.preferred));
-            await this.browser.waitForStability(2_000);
+            await this.browser.waitForStability(2_000, this.stabilityProfile());
             this.logger.ok("Authentication attempted");
             this.emit({
               type: "action_completed",

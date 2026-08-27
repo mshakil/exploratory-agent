@@ -1,11 +1,15 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import { PlaywrightAdapter } from "../browser/playwright-adapter.js";
+import type { Db } from "../db/client.js";
 import { Explorer } from "../explorer/index.js";
 import {
   DEFAULT_BOUNDARIES,
   DEFAULT_TEST_DATA,
+  applyStabilityProfile,
   type ExploreOptions,
+  type StabilityProfile,
+  type AuthMode,
 } from "../models/index.js";
 import { createSessionId, deriveApplicationName, SessionStore } from "./store.js";
 import type {
@@ -15,6 +19,7 @@ import type {
   ExplorationRun,
   ExplorationSession,
   Framework,
+  ListSessionsFilter,
   ResumeSessionInput,
   RunStatistics,
   SessionStatistics,
@@ -41,8 +46,8 @@ export class SessionManager {
   private readonly eventQueues = new Map<string, Promise<void>>();
   private eventSeq = 0;
 
-  constructor(private readonly dataRoot: string) {
-    this.store = new SessionStore(path.join(dataRoot, "sessions"));
+  constructor(private readonly dataRoot: string, db?: Db) {
+    this.store = new SessionStore(dataRoot, db);
     this.bus.setMaxListeners(100);
   }
 
@@ -50,16 +55,12 @@ export class SessionManager {
     return this.store;
   }
 
-  async listSessions(): Promise<ExplorationSession[]> {
-    const fromDisk = await this.store.listSessions();
-    for (const s of fromDisk) {
-      if (!this.sessionCache.has(s.id)) this.sessionCache.set(s.id, s);
+  async listSessions(filter?: ListSessionsFilter): Promise<ExplorationSession[]> {
+    const fromDb = await this.store.listSessions(filter);
+    for (const s of fromDb) {
+      this.sessionCache.set(s.id, s);
     }
-    return [...this.sessionCache.values()].sort(
-      (a, b) =>
-        new Date(b.updatedAt || b.createdAt).getTime() -
-        new Date(a.updatedAt || a.createdAt).getTime(),
-    );
+    return fromDb;
   }
 
   async getSession(sessionId: string): Promise<ExplorationSession | null> {
@@ -103,13 +104,36 @@ export class SessionManager {
     return () => this.bus.off("session", listener);
   }
 
-  async startExploration(input: CreateSessionInput): Promise<ExplorationSession> {
+  async startExploration(
+    input: CreateSessionInput,
+    opts: { wait?: boolean } = {},
+  ): Promise<ExplorationSession> {
     const url = normalizeUrl(input.applicationUrl);
     if (!url) {
       throw new Error("A valid application URL is required (include http:// or https://)");
     }
+    if (!input.ownerUserId?.trim()) {
+      throw new Error("ownerUserId is required");
+    }
 
     const framework = normalizeFramework(input.framework);
+    const profile = normalizeStabilityProfile(input.stabilityProfile);
+    const authMode = normalizeAuthMode(input.authMode, input.username, input.storageState);
+    const domainAllowlist =
+      input.domainAllowlist?.map((h) => h.trim()).filter(Boolean) ??
+      [safeHostname(url)].filter(Boolean);
+
+    const boundaries = applyStabilityProfile(profile, {
+      maxPages: input.maxPages,
+      maxDepth: input.maxDepth,
+      maxDurationMs: input.maxDurationMs,
+      domainAllowlist,
+      exploreOpenShadow: input.exploreOpenShadow,
+      exploreSameOriginFrames: input.exploreSameOriginFrames,
+      dismissConsent: input.dismissConsent,
+      authMode,
+    });
+
     const id = createSessionId();
     await this.store.ensureSession(id);
     const now = new Date().toISOString();
@@ -123,7 +147,6 @@ export class SessionManager {
       status: "running",
       statistics: emptyRunStats(),
     };
-    await this.store.saveRun(run);
 
     const session: ExplorationSession = {
       id,
@@ -135,28 +158,42 @@ export class SessionManager {
       createdAt: now,
       updatedAt: now,
       currentExplorationId: runId,
-      statistics: { pages: 0, elements: 0, actions: 0, flows: 0 },
+      statistics: { pages: 0, elements: 0, actions: 0, flows: 0, skipped: 0 },
       contextPath: this.store.contextDir(id),
       memoryPath: this.store.memoryDir(id),
+      ownerUserId: input.ownerUserId.trim(),
+      stabilityProfile: boundaries.stabilityProfile,
+      authMode: boundaries.authMode,
+      domainAllowlist: boundaries.domainAllowlist,
+      exploreOpenShadow: boundaries.exploreOpenShadow,
+      exploreSameOriginFrames: boundaries.exploreSameOriginFrames,
+      dismissConsent: boundaries.dismissConsent,
     };
 
+    // Session row must exist before runs (FK exploration_runs.session_id).
     this.sessionCache.set(id, session);
     await this.store.saveSession(session);
+    await this.store.saveRun(run);
     this.eventsCache.set(id, []);
-    await this.store.saveEvents(id, []);
+    await this.store.clearEvents(id);
     this.publishSession(session);
 
-    void this.runExploration(session.id, runId, "initial", {
+    const runner = this.runExploration(session.id, runId, "initial", {
       url,
       username: input.username,
       password: input.password,
-      headless: input.headless !== false,
-      maxPages: input.maxPages,
-      maxDepth: input.maxDepth,
-      maxDurationMs: input.maxDurationMs,
+      storageState: input.storageState,
+      headless: input.headless !== false && authMode !== "manual-wait",
+      maxPages: boundaries.maxPages,
+      maxDepth: boundaries.maxDepth,
+      maxDurationMs: boundaries.maxDurationMs,
+      boundaries,
     }).catch((err) => {
       console.error(`[session ${id}] exploration runner failed:`, err);
     });
+
+    if (opts.wait) await runner;
+    else void runner;
 
     return session;
   }
@@ -168,6 +205,7 @@ export class SessionManager {
   async resumeExploration(
     sessionId: string,
     input: ResumeSessionInput = {},
+    opts: { wait?: boolean } = {},
   ): Promise<ExplorationSession> {
     const existing = await this.getSession(sessionId);
     if (!existing) throw new Error("Session not found");
@@ -188,9 +226,9 @@ export class SessionManager {
     };
     await this.store.saveRun(run);
 
-    // Clear live event canvas for the new run (history remains in prior run files via change reports)
+    // Clear live event canvas for the new run (history remains in prior runs via change reports)
     this.eventsCache.set(sessionId, []);
-    await this.store.saveEvents(sessionId, []);
+    await this.store.clearEvents(sessionId);
 
     const session = await this.updateSession(sessionId, {
       status: "re-exploring",
@@ -200,7 +238,7 @@ export class SessionManager {
       startedAt: now,
     });
 
-    void this.runExploration(sessionId, runId, "resume", {
+    const runner = this.runExploration(sessionId, runId, "resume", {
       url: existing.applicationUrl,
       username: existing.username,
       password: input.password,
@@ -208,9 +246,22 @@ export class SessionManager {
       maxPages: input.maxPages,
       maxDepth: input.maxDepth,
       maxDurationMs: input.maxDurationMs,
+      boundaries: applyStabilityProfile(existing.stabilityProfile ?? "balanced", {
+        maxPages: input.maxPages,
+        maxDepth: input.maxDepth,
+        maxDurationMs: input.maxDurationMs,
+        domainAllowlist: existing.domainAllowlist,
+        exploreOpenShadow: existing.exploreOpenShadow,
+        exploreSameOriginFrames: existing.exploreSameOriginFrames,
+        dismissConsent: existing.dismissConsent,
+        authMode: existing.authMode,
+      }),
     }).catch((err) => {
       console.error(`[session ${sessionId}] resume runner failed:`, err);
     });
+
+    if (opts.wait) await runner;
+    else void runner;
 
     return session;
   }
@@ -222,12 +273,34 @@ export class SessionManager {
   async stopExploration(sessionId: string): Promise<ExplorationSession> {
     const active = this.active.get(sessionId);
     if (!active) throw new Error("No active exploration to stop");
-    active.abortRequested = true;
-    return this.updateSession(sessionId, { status: "paused" });
+    if (!active.abortRequested) {
+      active.abortRequested = true;
+      this.enqueueEvent(sessionId, {
+        type: "exploration_stopped",
+        title: "Stopping exploration…",
+        description: "Finishing the current action, then stopping",
+        status: "running",
+      });
+    }
+    // Keep live status until the runner exits — avoids Resume while still active
+    return this.requireSession(sessionId);
   }
 
   async pauseExploration(sessionId: string): Promise<ExplorationSession> {
-    return this.stopExploration(sessionId);
+    const active = this.active.get(sessionId);
+    if (!active) throw new Error("No active exploration to pause");
+    active.paused = true;
+    if (!active.abortRequested) {
+      active.abortRequested = true;
+      this.enqueueEvent(sessionId, {
+        type: "exploration_paused",
+        title: "Pausing exploration…",
+        description: "Finishing the current action, then pausing",
+        status: "running",
+      });
+    }
+    // Keep live status until the runner exits — avoids Resume while still active
+    return this.requireSession(sessionId);
   }
 
   private async runExploration(
@@ -238,10 +311,12 @@ export class SessionManager {
       url: string;
       username?: string;
       password?: string;
+      storageState?: string;
       headless: boolean;
       maxPages?: number;
       maxDepth?: number;
       maxDurationMs?: number;
+      boundaries?: ReturnType<typeof applyStabilityProfile>;
     },
   ): Promise<void> {
     this.active.set(sessionId, { abortRequested: false, paused: false, runId });
@@ -257,6 +332,18 @@ export class SessionManager {
     });
 
     const runs = await this.store.listRuns(sessionId);
+    const boundaries =
+      creds.boundaries ??
+      applyStabilityProfile(session.stabilityProfile ?? "balanced", {
+        maxPages: creds.maxPages,
+        maxDepth: creds.maxDepth,
+        maxDurationMs: creds.maxDurationMs,
+        domainAllowlist: session.domainAllowlist,
+        exploreOpenShadow: session.exploreOpenShadow,
+        exploreSameOriginFrames: session.exploreSameOriginFrames,
+        dismissConsent: session.dismissConsent,
+        authMode: session.authMode,
+      });
 
     const options: ExploreOptions = {
       url: creds.url,
@@ -264,6 +351,7 @@ export class SessionManager {
       memoryDir: this.store.memoryDir(sessionId),
       username: creds.username,
       password: creds.password,
+      storageState: creds.storageState,
       headless: creds.headless,
       json: true,
       verbose: false,
@@ -275,9 +363,10 @@ export class SessionManager {
       shouldAbort: () => this.active.get(sessionId)?.abortRequested === true,
       boundaries: {
         ...DEFAULT_BOUNDARIES,
-        maxPages: creds.maxPages ?? DEFAULT_BOUNDARIES.maxPages,
-        maxDepth: creds.maxDepth ?? DEFAULT_BOUNDARIES.maxDepth,
-        maxDurationMs: creds.maxDurationMs ?? DEFAULT_BOUNDARIES.maxDurationMs,
+        ...boundaries,
+        maxPages: creds.maxPages ?? boundaries.maxPages,
+        maxDepth: creds.maxDepth ?? boundaries.maxDepth,
+        maxDurationMs: creds.maxDurationMs ?? boundaries.maxDurationMs,
       },
       testData: { ...DEFAULT_TEST_DATA },
     };
@@ -294,6 +383,8 @@ export class SessionManager {
       const result = await explorer.run(false);
       await this.flushEventQueue(sessionId);
 
+      const aborted = this.active.get(sessionId)?.abortRequested === true;
+      const wasPause = this.active.get(sessionId)?.paused === true;
       const events = this.eventsCache.get(sessionId) ?? [];
       const runStats: RunStatistics = result.runStatistics ?? {
         ...emptyRunStats(),
@@ -308,28 +399,43 @@ export class SessionManager {
         type: runType,
         startedAt: session.startedAt ?? completedAt,
         completedAt,
-        status: "completed",
+        status: aborted ? "failed" : "completed",
         statistics: runStats,
         changeReportPath: result.changeReport
           ? `changes/${runId}.md`
           : undefined,
       });
 
+      const skipped =
+        result.exploration.skippedActions ??
+        events.filter((e) => e.type === "action_skipped").length;
+
+      if (aborted) {
+        this.enqueueEvent(sessionId, {
+          type: wasPause ? "exploration_paused" : "exploration_stopped",
+          title: wasPause ? "Exploration paused" : "Exploration stopped",
+          status: "skipped",
+        });
+        await this.flushEventQueue(sessionId);
+      }
+
       await this.updateSession(sessionId, {
-        status: "completed",
-        completedAt,
+        status: aborted ? "paused" : "completed",
+        completedAt: aborted ? undefined : completedAt,
         error: undefined,
-        latestChanges: result.runStatistics,
+        latestChanges: aborted ? undefined : result.runStatistics,
         statistics: {
           pages: result.exploration.pagesDiscovered,
           elements: result.exploration.elementsDiscovered,
           actions: events.filter((e) => e.type === "action_completed").length,
           flows: result.exploration.flowsDiscovered,
+          skipped,
         },
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.flushEventQueue(sessionId).catch(() => undefined);
+      const aborted = this.active.get(sessionId)?.abortRequested === true;
       const completedAt = new Date().toISOString();
       await this.store
         .saveRun({
@@ -343,9 +449,9 @@ export class SessionManager {
         })
         .catch(() => undefined);
       await this.updateSession(sessionId, {
-        status: "failed",
-        completedAt,
-        error: message,
+        status: aborted ? "paused" : "failed",
+        completedAt: aborted ? undefined : completedAt,
+        error: aborted ? undefined : message,
       }).catch((updateErr) => {
         console.error(`[session ${sessionId}] failed to persist failure state:`, updateErr);
       });
@@ -384,7 +490,7 @@ export class SessionManager {
     const list = this.eventsCache.get(sessionId) ?? (await this.store.loadEvents(sessionId));
     list.push(event);
     this.eventsCache.set(sessionId, list);
-    void this.store.saveEvents(sessionId, [...list]).catch(() => undefined);
+    void this.store.appendEvent(sessionId, event).catch(() => undefined);
 
     this.bus.emit(`event:${sessionId}`, event);
 
@@ -558,6 +664,37 @@ function normalizeFramework(raw?: Framework | string): Framework {
   return "independent";
 }
 
+function normalizeStabilityProfile(raw?: string): StabilityProfile {
+  if (raw === "fast" || raw === "deep" || raw === "balanced") return raw;
+  return "balanced";
+}
+
+function normalizeAuthMode(
+  raw?: string,
+  username?: string,
+  storageState?: string,
+): AuthMode {
+  if (
+    raw === "none" ||
+    raw === "credentials" ||
+    raw === "storage-state" ||
+    raw === "manual-wait"
+  ) {
+    return raw;
+  }
+  if (storageState) return "storage-state";
+  if (username) return "credentials";
+  return "none";
+}
+
+function safeHostname(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
 function mergeStats(
   current: SessionStatistics,
   patch: Partial<SessionStatistics>,
@@ -567,6 +704,7 @@ function mergeStats(
     elements: patch.elements ?? current.elements,
     actions: patch.actions ?? current.actions,
     flows: patch.flows ?? current.flows,
+    skipped: patch.skipped ?? current.skipped ?? 0,
   };
 }
 

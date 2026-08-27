@@ -72,6 +72,7 @@ export async function generateDocumentation(
       elements: context.exploration.elementsDiscovered,
       actions: 0,
       flows: context.exploration.flowsDiscovered,
+      skipped: context.exploration.skippedActions,
     },
     runs: meta?.runs ?? [],
     frameworkRel,

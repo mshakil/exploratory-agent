@@ -6,6 +6,10 @@ import type {
   ElementSnapshot,
   PageState,
 } from "./types.js";
+import {
+  type StabilityProfile,
+  stabilityTimingFor,
+} from "../models/index.js";
 
 const INTERACTIVE_SELECTOR = [
   "a[href]",
@@ -86,9 +90,14 @@ export class PlaywrightAdapter implements BrowserAdapter {
   /**
    * Wait until the document is usable after clicks/navigations.
    * Avoids evaluate races when Playwright destroys the old execution context.
+   * Profile controls settle depth (Fast / Balanced / Deep).
    */
-  private async waitForSettled(timeoutMs = 5_000): Promise<void> {
+  private async waitForSettled(
+    timeoutMs = 5_000,
+    profile: StabilityProfile = "balanced",
+  ): Promise<void> {
     const page = this.requirePage();
+    const timing = stabilityTimingFor(profile);
     try {
       await page.waitForLoadState("domcontentloaded", { timeout: timeoutMs });
     } catch {
@@ -99,7 +108,59 @@ export class PlaywrightAdapter implements BrowserAdapter {
     } catch {
       // best-effort
     }
-    await page.waitForTimeout(100);
+
+    if (timing.networkIdle) {
+      try {
+        await page.waitForLoadState("networkidle", {
+          timeout: Math.min(timeoutMs, timing.networkIdleCapMs || 3_000),
+        });
+      } catch {
+        // capped; SPA may keep connections open
+      }
+    }
+
+    if (timing.mutationQuietMs > 0) {
+      await this.waitForMutationQuiet(page, timing.mutationQuietMs, timeoutMs);
+    }
+
+    await page.waitForTimeout(Math.max(timing.settleMs, 50));
+  }
+
+  private async waitForMutationQuiet(
+    page: Page,
+    quietMs: number,
+    overallTimeoutMs: number,
+  ): Promise<void> {
+    try {
+      await page.evaluate(
+        async ({ quiet, overall }) => {
+          await new Promise<void>((resolve) => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const done = () => {
+              observer.disconnect();
+              if (timer) clearTimeout(timer);
+              resolve();
+            };
+            const bump = () => {
+              if (timer) clearTimeout(timer);
+              timer = setTimeout(done, quiet);
+            };
+            const observer = new MutationObserver(bump);
+            observer.observe(document.documentElement, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+              characterData: true,
+            });
+            bump();
+            setTimeout(done, overall);
+          });
+        },
+        { quiet: quietMs, overall: Math.min(overallTimeoutMs, 5_000) },
+      );
+    } catch {
+      // best-effort — frame may have navigated
+    }
   }
 
   private async evaluateWithRetry<T>(
@@ -186,8 +247,11 @@ export class PlaywrightAdapter implements BrowserAdapter {
     }
   }
 
-  async waitForStability(timeoutMs = 100): Promise<void> {
-    await this.waitForSettled(Math.max(timeoutMs, 1_000));
+  async waitForStability(
+    timeoutMs = 100,
+    profile: StabilityProfile = "balanced",
+  ): Promise<void> {
+    await this.waitForSettled(Math.max(timeoutMs, 1_000), profile);
   }
 
   async goBack(): Promise<void> {
@@ -347,7 +411,11 @@ export class PlaywrightAdapter implements BrowserAdapter {
     const page = this.requirePage();
 
     if (element.strategy === "testId" && element.value) {
-      return page.getByTestId(element.value);
+      // Playwright getByTestId defaults to data-testid only; many apps use data-test / data-cy / data-qa.
+      const v = JSON.stringify(element.value);
+      return page.locator(
+        `[data-testid=${v}], [data-test=${v}], [data-cy=${v}], [data-qa=${v}]`,
+      );
     }
     if (element.strategy === "role" && element.role) {
       return page.getByRole(element.role as Parameters<Page["getByRole"]>[0], {

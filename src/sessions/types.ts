@@ -42,6 +42,7 @@ export const SessionStatisticsSchema = z.object({
   elements: z.number().default(0),
   actions: z.number().default(0),
   flows: z.number().default(0),
+  skipped: z.number().default(0),
 });
 export type SessionStatistics = z.infer<typeof SessionStatisticsSchema>;
 
@@ -86,8 +87,17 @@ export const ExplorationSessionSchema = z.object({
   statistics: SessionStatisticsSchema,
   contextPath: z.string(),
   memoryPath: z.string(),
+  /** Explorer-user who owns this exploration session (not target-app username). */
+  ownerUserId: z.string().optional(),
   /** Latest change summary from the most recent resume run. */
   latestChanges: RunStatisticsSchema.optional(),
+  /** Hardening operator settings (no secrets). */
+  stabilityProfile: z.enum(["fast", "balanced", "deep"]).optional(),
+  authMode: z.enum(["none", "credentials", "storage-state", "manual-wait"]).optional(),
+  domainAllowlist: z.array(z.string()).optional(),
+  exploreOpenShadow: z.boolean().optional(),
+  exploreSameOriginFrames: z.boolean().optional(),
+  dismissConsent: z.boolean().optional(),
 });
 export type ExplorationSession = z.infer<typeof ExplorationSessionSchema>;
 
@@ -105,7 +115,14 @@ export const ExplorationEventTypeSchema = z.enum([
   "flow_discovered",
   "exploration_completed",
   "exploration_failed",
+  "exploration_paused",
+  "exploration_stopped",
   "knowledge_loaded",
+  "auth_started",
+  "auth_succeeded",
+  "auth_failed",
+  "auth_manual_waiting",
+  "coverage_updated",
 ]);
 export type ExplorationEventType = z.infer<typeof ExplorationEventTypeSchema>;
 
@@ -148,6 +165,8 @@ export interface ExplorationEventPayload {
 
 export interface CreateSessionInput {
   applicationUrl: string;
+  /** Explorer-user id that owns the new session. */
+  ownerUserId: string;
   username?: string;
   password?: string;
   framework?: Framework;
@@ -155,6 +174,19 @@ export interface CreateSessionInput {
   maxPages?: number;
   maxDepth?: number;
   maxDurationMs?: number;
+  stabilityProfile?: "fast" | "balanced" | "deep";
+  authMode?: "none" | "credentials" | "storage-state" | "manual-wait";
+  storageState?: string;
+  domainAllowlist?: string[];
+  exploreOpenShadow?: boolean;
+  exploreSameOriginFrames?: boolean;
+  dismissConsent?: boolean;
+}
+
+export interface ListSessionsFilter {
+  ownerUserId?: string;
+  /** When true, return all sessions including legacy (no owner). */
+  admin?: boolean;
 }
 
 export interface ResumeSessionInput {

@@ -168,6 +168,8 @@ export class SessionManager {
       exploreOpenShadow: boundaries.exploreOpenShadow,
       exploreSameOriginFrames: boundaries.exploreSameOriginFrames,
       dismissConsent: boundaries.dismissConsent,
+      docGenerationMode: input.docGenerationMode === "ai" ? "ai" : "system",
+      aiModules: input.aiModules?.length ? input.aiModules : input.docGenerationMode === "ai" ? ["docs"] : [],
     };
 
     // Session row must exist before runs (FK exploration_runs.session_id).
@@ -238,6 +240,9 @@ export class SessionManager {
       startedAt: now,
     });
 
+    const resumeDuration =
+      input.maxDurationMs ?? Math.max(DEFAULT_BOUNDARIES.maxDurationMs, 600_000);
+
     const runner = this.runExploration(sessionId, runId, "resume", {
       url: existing.applicationUrl,
       username: existing.username,
@@ -245,11 +250,11 @@ export class SessionManager {
       headless: input.headless !== false,
       maxPages: input.maxPages,
       maxDepth: input.maxDepth,
-      maxDurationMs: input.maxDurationMs,
+      maxDurationMs: resumeDuration,
       boundaries: applyStabilityProfile(existing.stabilityProfile ?? "balanced", {
         maxPages: input.maxPages,
         maxDepth: input.maxDepth,
-        maxDurationMs: input.maxDurationMs,
+        maxDurationMs: resumeDuration,
         domainAllowlist: existing.domainAllowlist,
         exploreOpenShadow: existing.exploreOpenShadow,
         exploreSameOriginFrames: existing.exploreSameOriginFrames,
@@ -379,8 +384,8 @@ export class SessionManager {
       if (runType === "initial") {
         await this.updateSession(sessionId, { status: "exploring" });
       }
-      // Re-explore always starts fresh crawl (change detection uses previous application.json)
-      const result = await explorer.run(false);
+      // Hybrid resume: load memory + visited, prefer new/unfinished areas; change detection still on.
+      const result = await explorer.run(runType === "resume");
       await this.flushEventQueue(sessionId);
 
       const aborted = this.active.get(sessionId)?.abortRequested === true;
@@ -536,7 +541,7 @@ export class SessionManager {
     return session;
   }
 
-  private async updateSession(
+  async updateSession(
     sessionId: string,
     patch: Partial<ExplorationSession>,
   ): Promise<ExplorationSession> {

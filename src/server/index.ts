@@ -171,6 +171,110 @@ async function handleRequest(
     return;
   }
 
+  // --- AI BYOK API (authenticated; keys never persisted) ---
+  if (pathname === "/api/ai/providers" && method === "GET") {
+    const user = await auth.requireUser(req);
+    if (!user) {
+      json(req, res, 401, { error: "Not authenticated" });
+      return;
+    }
+    const { AI_PROVIDERS } = await import("../ai/index.js");
+    json(req, res, 200, { providers: AI_PROVIDERS });
+    return;
+  }
+
+  if (pathname === "/api/ai/generate-docs" && method === "POST") {
+    const user = await auth.requireUser(req);
+    if (!user) {
+      json(req, res, 401, { error: "Not authenticated" });
+      return;
+    }
+    const apiKeyHeader = String(req.headers["x-api-key"] || "").trim();
+    const body = await readJsonBody<{
+      sessionId?: string;
+      provider?: string;
+      model?: string;
+      modules?: string[];
+      azureEndpoint?: string;
+      azureDeployment?: string;
+      apiKey?: string;
+    }>(req);
+    // Prefer header; allow body only as fallback (never log either)
+    const apiKey = apiKeyHeader || String(body.apiKey || "").trim();
+    if (!body.sessionId) {
+      json(req, res, 400, { error: "sessionId is required" });
+      return;
+    }
+    if (!apiKey) {
+      json(req, res, 400, { error: "API key required (x-api-key header)" });
+      return;
+    }
+    if (!body.provider || !body.model) {
+      json(req, res, 400, { error: "provider and model are required" });
+      return;
+    }
+
+    const owned = await requireOwnedSession(req, res, manager, auth, user, body.sessionId);
+    if (!owned) return;
+
+    try {
+      const { ApplicationContextSchema } = await import("../models/index.js");
+      const { generateAiDocumentation } = await import("../ai/index.js");
+      const contextPath = path.join(owned.contextPath, "application.json");
+      const raw = await readFile(contextPath, "utf8");
+      const context = ApplicationContextSchema.parse(JSON.parse(raw));
+      const modules = (body.modules || ["docs"]).filter(
+        (m): m is "docs" | "enrich" | "explore-hints" =>
+          m === "docs" || m === "enrich" || m === "explore-hints",
+      );
+      const result = await generateAiDocumentation({
+        context,
+        outputDir: owned.contextPath,
+        meta: {
+          framework: owned.framework,
+          applicationName: owned.applicationName,
+          applicationUrl: owned.applicationUrl,
+          status: owned.status,
+          statistics: owned.statistics,
+          runs: await manager.listRuns(owned.id),
+        },
+        modules,
+        chat: {
+          provider: body.provider as "openai" | "anthropic" | "azure-openai",
+          model: body.model,
+          apiKey,
+          azureEndpoint: body.azureEndpoint,
+          azureDeployment: body.azureDeployment,
+        },
+      });
+
+      if (result.error && result.fallbackToSystem) {
+        json(req, res, 502, {
+          error: result.error,
+          fallbackToSystem: true,
+          usage: result.usage,
+        });
+        return;
+      }
+
+      const session = await manager.updateSession(owned.id, {
+        docGenerationMode: "ai",
+        aiModules: modules,
+        aiUsage: result.usage,
+      });
+
+      json(req, res, 200, {
+        ok: true,
+        files: result.files.map((f) => path.basename(f)),
+        usage: result.usage,
+        session,
+      });
+    } catch (err) {
+      json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
   // --- Protected session API ---
   if (pathname.startsWith("/api/sessions")) {
     const user = await auth.requireUser(req);
@@ -204,6 +308,8 @@ async function handleRequest(
         exploreOpenShadow?: boolean;
         exploreSameOriginFrames?: boolean;
         dismissConsent?: boolean;
+        docGenerationMode?: "system" | "ai";
+        aiModules?: Array<"docs" | "enrich" | "explore-hints">;
       }>(req);
 
       if (!body.url || typeof body.url !== "string") {
@@ -238,6 +344,8 @@ async function handleRequest(
           exploreOpenShadow: body.exploreOpenShadow,
           exploreSameOriginFrames: body.exploreSameOriginFrames,
           dismissConsent: body.dismissConsent,
+          docGenerationMode: body.docGenerationMode,
+          aiModules: body.aiModules,
         });
         json(req, res, 201, { session });
       } catch (err) {

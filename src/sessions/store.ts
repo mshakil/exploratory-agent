@@ -72,6 +72,18 @@ function sessionFromRow(row: SessionRow, dataRoot: string): ExplorationSession {
     exploreOpenShadow: row.exploreOpenShadow ?? undefined,
     exploreSameOriginFrames: row.exploreSameOriginFrames ?? undefined,
     dismissConsent: row.dismissConsent ?? undefined,
+    docGenerationMode:
+      row.docGenerationMode === "ai" || row.docGenerationMode === "system"
+        ? row.docGenerationMode
+        : undefined,
+    aiModules: Array.isArray(row.aiModules)
+      ? (row.aiModules as string[]).filter((m): m is "docs" | "enrich" | "explore-hints" =>
+          m === "docs" || m === "enrich" || m === "explore-hints",
+        )
+      : undefined,
+    aiUsage: row.aiUsage
+      ? (row.aiUsage as ExplorationSession["aiUsage"])
+      : undefined,
   };
 
   return ExplorationSessionSchema.parse(raw);
@@ -174,6 +186,9 @@ export class SessionStore {
       exploreSameOriginFrames: parsed.exploreSameOriginFrames ?? null,
       dismissConsent: parsed.dismissConsent ?? null,
       latestChanges: parsed.latestChanges ?? null,
+      docGenerationMode: parsed.docGenerationMode ?? null,
+      aiModules: parsed.aiModules ?? [],
+      aiUsage: parsed.aiUsage ?? null,
     };
 
     await this.db
@@ -207,6 +222,9 @@ export class SessionStore {
           exploreSameOriginFrames: values.exploreSameOriginFrames,
           dismissConsent: values.dismissConsent,
           latestChanges: values.latestChanges,
+          docGenerationMode: values.docGenerationMode,
+          aiModules: values.aiModules,
+          aiUsage: values.aiUsage,
         },
       });
   }

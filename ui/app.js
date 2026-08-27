@@ -98,12 +98,26 @@ const els = {
   btnDetails: /** @type {HTMLButtonElement} */ ($("btn-details")),
   btnDocs: /** @type {HTMLButtonElement} */ ($("btn-docs")),
   btnResumeCtx: /** @type {HTMLButtonElement} */ ($("btn-resume-ctx")),
+  btnAiDocs: /** @type {HTMLButtonElement} */ ($("btn-ai-docs")),
   btnTheme: /** @type {HTMLButtonElement} */ ($("btn-theme")),
   docModal: /** @type {HTMLElement} */ ($("doc-modal")),
   docModalTitle: /** @type {HTMLElement} */ ($("doc-modal-title")),
   docContent: /** @type {HTMLElement} */ ($("doc-content")),
   docCopy: /** @type {HTMLButtonElement} */ ($("doc-copy")),
   docClose: /** @type {HTMLButtonElement} */ ($("doc-close")),
+  resumeModal: /** @type {HTMLElement} */ ($("resume-modal")),
+  resumePassword: /** @type {HTMLInputElement} */ ($("resume-password")),
+  resumeCancel: /** @type {HTMLButtonElement} */ ($("resume-cancel")),
+  resumeConfirm: /** @type {HTMLButtonElement} */ ($("resume-confirm")),
+  aiModal: /** @type {HTMLElement} */ ($("ai-modal")),
+  aiProvider: /** @type {HTMLSelectElement} */ ($("ai-provider")),
+  aiModel: /** @type {HTMLInputElement} */ ($("ai-model")),
+  aiApiKey: /** @type {HTMLInputElement} */ ($("ai-api-key")),
+  aiAzureEndpoint: /** @type {HTMLInputElement} */ ($("ai-azure-endpoint")),
+  aiAzureDeployment: /** @type {HTMLInputElement} */ ($("ai-azure-deployment")),
+  aiUsagePreview: /** @type {HTMLElement} */ ($("ai-usage-preview")),
+  aiCancel: /** @type {HTMLButtonElement} */ ($("ai-cancel")),
+  aiSave: /** @type {HTMLButtonElement} */ ($("ai-save")),
   tplConfig: /** @type {HTMLTemplateElement} */ ($("tpl-config")),
 };
 
@@ -219,7 +233,24 @@ function mountConfigPanels() {
     auth?.addEventListener("change", () => syncAuthUi(key));
     syncAuthUi(key);
     syncProfileChecks(key);
+
+    root.querySelector(".cfg-advanced-toggle")?.addEventListener("click", () => {
+      root.querySelector(".cfg-advanced")?.classList.toggle("hidden");
+    });
+
+    const docMode = /** @type {HTMLSelectElement | null} */ (root.querySelector(".cfg-doc-mode"));
+    docMode?.addEventListener("change", () => syncDocModeUi(key));
+    syncDocModeUi(key);
+
+    root.querySelector(".cfg-ai-configure")?.addEventListener("click", () => openAiModal());
   }
+}
+
+function syncDocModeUi(key) {
+  const root = state.configRoots[key];
+  if (!root) return;
+  const mode = /** @type {HTMLSelectElement} */ (root.querySelector(".cfg-doc-mode")).value;
+  root.querySelector(".cfg-ai-wrap")?.classList.toggle("hidden", mode !== "ai");
 }
 
 function syncAuthUi(key) {
@@ -256,6 +287,14 @@ function readConfig(key) {
   const dismissConsent = /** @type {HTMLInputElement} */ (root.querySelector(".cfg-consent")).checked;
   const exploreOpenShadow = /** @type {HTMLInputElement} */ (root.querySelector(".cfg-shadow")).checked;
   const exploreSameOriginFrames = /** @type {HTMLInputElement} */ (root.querySelector(".cfg-frames")).checked;
+  const maxPagesRaw = /** @type {HTMLInputElement} */ (root.querySelector(".cfg-max-pages")).value;
+  const maxDepthRaw = /** @type {HTMLInputElement} */ (root.querySelector(".cfg-max-depth")).value;
+  const maxDurationMin = /** @type {HTMLInputElement} */ (root.querySelector(".cfg-max-duration")).value;
+  const docGenerationMode = /** @type {HTMLSelectElement} */ (root.querySelector(".cfg-doc-mode")).value;
+  const aiModules = [];
+  if (/** @type {HTMLInputElement} */ (root.querySelector(".cfg-ai-mod-docs")).checked) aiModules.push("docs");
+  if (/** @type {HTMLInputElement} */ (root.querySelector(".cfg-ai-mod-enrich")).checked) aiModules.push("enrich");
+  if (/** @type {HTMLInputElement} */ (root.querySelector(".cfg-ai-mod-hints")).checked) aiModules.push("explore-hints");
 
   /** @type {Record<string, unknown>} */
   const payload = {
@@ -265,13 +304,66 @@ function readConfig(key) {
     dismissConsent,
     exploreOpenShadow,
     exploreSameOriginFrames,
+    docGenerationMode,
+    aiModules,
   };
   if (username) payload.username = username;
   if (password) payload.password = password;
   if (storageState) payload.storageState = storageState;
   if (domainAllowlist.length) payload.domainAllowlist = domainAllowlist;
   if (authMode === "manual-wait") payload.headless = false;
+  const maxPages = Number(maxPagesRaw);
+  if (Number.isFinite(maxPages) && maxPages > 0) payload.maxPages = Math.floor(maxPages);
+  const maxDepth = Number(maxDepthRaw);
+  if (Number.isFinite(maxDepth) && maxDepth > 0) payload.maxDepth = Math.floor(maxDepth);
+  const minutes = Number(maxDurationMin);
+  if (Number.isFinite(minutes) && minutes > 0) payload.maxDurationMs = Math.floor(minutes * 60_000);
   return payload;
+}
+
+const AI_STORAGE_KEY = "ae.ai.byok";
+
+function loadAiConfig() {
+  try {
+    return JSON.parse(sessionStorage.getItem(AI_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveAiConfig(cfg) {
+  sessionStorage.setItem(AI_STORAGE_KEY, JSON.stringify(cfg));
+}
+
+function syncAiAzureUi() {
+  const azure = els.aiProvider.value === "azure-openai";
+  document.querySelectorAll(".ai-azure-wrap").forEach((el) => el.classList.toggle("hidden", !azure));
+}
+
+function openAiModal() {
+  const cfg = loadAiConfig();
+  els.aiProvider.value = cfg.provider || "openai";
+  els.aiModel.value = cfg.model || (cfg.provider === "anthropic" ? "claude-3-5-haiku-latest" : "gpt-4o-mini");
+  els.aiApiKey.value = cfg.apiKey || "";
+  els.aiAzureEndpoint.value = cfg.azureEndpoint || "";
+  els.aiAzureDeployment.value = cfg.azureDeployment || "";
+  if (cfg.lastUsage) {
+    els.aiUsagePreview.textContent = formatAiUsage(cfg.lastUsage);
+  } else {
+    els.aiUsagePreview.textContent = "Tokens and estimated cost appear after generation.";
+  }
+  syncAiAzureUi();
+  els.aiModal.classList.remove("hidden");
+}
+
+function formatAiUsage(usage) {
+  const prompt = usage.promptTokens ?? 0;
+  const completion = usage.completionTokens ?? 0;
+  const total = usage.totalTokens ?? prompt + completion;
+  const cost = usage.estimatedCostUsd;
+  const costText =
+    typeof cost === "number" ? ` · ~$${cost.toFixed(4)} USD (estimate only)` : "";
+  return `Tokens: ${prompt} prompt + ${completion} completion = ${total} total${costText}`;
 }
 
 function showShell() {
@@ -509,6 +601,7 @@ function renderMain(session) {
     els.btnResumeRun.classList.add("hidden");
     els.btnStop.classList.add("hidden");
     els.btnResumeCtx.classList.add("hidden");
+    els.btnAiDocs.classList.add("hidden");
     els.limitBanner.classList.remove("show");
     els.failedBanner.classList.add("hidden");
     els.ssoBanner.classList.remove("show");
@@ -549,6 +642,14 @@ function renderMain(session) {
   els.btnStop.disabled = (!live && session.status === "paused") || state.pauseRequested;
   els.btnResumeRun.classList.toggle("hidden", session.status !== "paused" || live);
   els.btnResumeCtx.classList.toggle("hidden", !canResume(session.status) || live);
+  els.btnAiDocs.classList.toggle(
+    "hidden",
+    live || !(session.status === "completed" || session.status === "paused" || session.status === "failed"),
+  );
+  const resumeHint =
+    "Continues from saved memory and looks for new areas; compares against previous docs.";
+  els.btnResumeRun.title = resumeHint;
+  els.btnResumeCtx.title = resumeHint;
 
   if (live && state.pauseRequested) {
     els.topPill.className = "pill paused dot";
@@ -843,10 +944,42 @@ function bindEvents() {
       alert("Exploration is still stopping. Wait until status is Paused, then Resume.");
       return;
     }
+    /** @type {Record<string, unknown>} */
+    const body = {};
+    const needsPassword =
+      Boolean(current?.username) &&
+      (current?.authMode === "credentials" || (!current?.authMode && current?.username));
+    if (needsPassword) {
+      els.resumePassword.value = "";
+      els.resumeModal.classList.remove("hidden");
+      const password = await new Promise((resolve) => {
+        const onConfirm = () => {
+          cleanup();
+          resolve(els.resumePassword.value);
+        };
+        const onCancel = () => {
+          cleanup();
+          resolve(null);
+        };
+        const cleanup = () => {
+          els.resumeConfirm.removeEventListener("click", onConfirm);
+          els.resumeCancel.removeEventListener("click", onCancel);
+          els.resumeModal.classList.add("hidden");
+        };
+        els.resumeConfirm.addEventListener("click", onConfirm);
+        els.resumeCancel.addEventListener("click", onCancel);
+      });
+      if (password == null) return;
+      if (!password.trim()) {
+        alert("Password is required to re-authenticate for resume.");
+        return;
+      }
+      body.password = password;
+    }
     try {
       const { session } = await api(`/api/sessions/${encodeURIComponent(state.selectedId)}/resume`, {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify(body),
       });
       state.pauseRequested = false;
       upsertSession(session);
@@ -859,6 +992,73 @@ function bindEvents() {
   els.btnResumeRun.addEventListener("click", () => void resume());
   els.btnResumeCtx.addEventListener("click", () => void resume());
   els.btnRetry.addEventListener("click", () => void resume());
+
+  els.btnAiDocs.addEventListener("click", () => void generateAiDocs());
+  els.aiProvider.addEventListener("change", syncAiAzureUi);
+  els.aiCancel.addEventListener("click", () => els.aiModal.classList.add("hidden"));
+  els.aiSave.addEventListener("click", () => {
+    const cfg = {
+      provider: els.aiProvider.value,
+      model: els.aiModel.value.trim(),
+      apiKey: els.aiApiKey.value,
+      azureEndpoint: els.aiAzureEndpoint.value.trim(),
+      azureDeployment: els.aiAzureDeployment.value.trim(),
+      lastUsage: loadAiConfig().lastUsage,
+    };
+    if (!cfg.apiKey) {
+      alert("API key is required");
+      return;
+    }
+    if (!cfg.model) {
+      alert("Model is required");
+      return;
+    }
+    saveAiConfig(cfg);
+    els.aiModal.classList.add("hidden");
+  });
+  els.aiModal.addEventListener("click", (e) => {
+    if (e.target === els.aiModal) els.aiModal.classList.add("hidden");
+  });
+  els.resumeModal.addEventListener("click", (e) => {
+    if (e.target === els.resumeModal) els.resumeModal.classList.add("hidden");
+  });
+
+  async function generateAiDocs() {
+    if (!state.selectedId) return;
+    const cfg = loadAiConfig();
+    if (!cfg.apiKey || !cfg.model) {
+      openAiModal();
+      alert("Configure your AI provider, model, and API key first.");
+      return;
+    }
+    els.btnAiDocs.disabled = true;
+    try {
+      const data = await api("/api/ai/generate-docs", {
+        method: "POST",
+        headers: { "x-api-key": cfg.apiKey },
+        body: JSON.stringify({
+          sessionId: state.selectedId,
+          provider: cfg.provider || "openai",
+          model: cfg.model,
+          modules: ["docs"],
+          azureEndpoint: cfg.azureEndpoint || undefined,
+          azureDeployment: cfg.azureDeployment || undefined,
+        }),
+      });
+      if (data.usage) {
+        saveAiConfig({ ...cfg, lastUsage: data.usage });
+        els.aiUsagePreview.textContent = formatAiUsage(data.usage);
+        alert(`AI docs generated.\n${formatAiUsage(data.usage)}`);
+      } else {
+        alert("AI docs generated.");
+      }
+      await selectSession(state.selectedId);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      els.btnAiDocs.disabled = false;
+    }
+  }
 
   els.btnDownloadZip.addEventListener("click", () => {
     if (!state.selectedId || els.btnDownloadZip.disabled) return;

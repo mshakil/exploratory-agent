@@ -175,7 +175,8 @@
             <div class="foot-links">
               <button type="button" class="linkish" id="btn-details">Details</button>
               <button type="button" class="linkish" id="btn-docs">Docs</button>
-              <button type="button" class="primary compact hidden" id="btn-resume-ctx">Resume exploration</button>
+              <button type="button" class="primary compact hidden" id="btn-resume-ctx" title="Continues from saved memory and looks for new areas; compares against previous docs.">Resume exploration</button>
+              <button type="button" class="ghost compact hidden" id="btn-ai-docs" title="Rewrite markdown docs with your AI key">Generate AI docs</button>
             </div>
           </div>
         </section>
@@ -242,6 +243,41 @@
           <label>Domain allowlist</label>
           <textarea class="field cfg-allowlist" placeholder="One host per line (default: start origin)"></textarea>
         </div>
+        <div class="cfg-field full">
+          <button type="button" class="linkish cfg-advanced-toggle">Advanced budgets…</button>
+        </div>
+        <div class="cfg-advanced hidden">
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <label>Max pages</label>
+              <input class="field cfg-max-pages" type="number" min="1" max="500" placeholder="50" />
+            </div>
+            <div class="cfg-field">
+              <label>Max depth</label>
+              <input class="field cfg-max-depth" type="number" min="1" max="50" placeholder="8" />
+            </div>
+            <div class="cfg-field full">
+              <label>Max duration (minutes)</label>
+              <input class="field cfg-max-duration" type="number" min="1" max="120" placeholder="5" />
+            </div>
+          </div>
+        </div>
+        <div class="cfg-field full">
+          <label>Output generation</label>
+          <select class="field cfg-doc-mode">
+            <option value="system" selected>System (deterministic)</option>
+            <option value="ai">AI (bring your own key)</option>
+          </select>
+          <p class="muted cfg-hint">AI rewrites markdown from application.json. JSON stays system-generated.</p>
+        </div>
+        <div class="cfg-field full cfg-ai-wrap hidden">
+          <button type="button" class="ghost compact cfg-ai-configure">Configure AI…</button>
+          <div class="checks cfg-ai-modules">
+            <label><input type="checkbox" class="cfg-ai-mod-docs" checked /> Docs module</label>
+            <label><input type="checkbox" class="cfg-ai-mod-enrich" disabled /> Enrich names (soon)</label>
+            <label><input type="checkbox" class="cfg-ai-mod-hints" disabled /> Explore hints (soon)</label>
+          </div>
+        </div>
       </div>
       <div class="checks">
         <label><input type="checkbox" class="cfg-consent" /> Dismiss cookie / consent banners</label>
@@ -249,6 +285,63 @@
         <label><input type="checkbox" class="cfg-frames" /> Explore same-origin iframes</label>
       </div>
     </template>
+
+    <div class="modal-overlay hidden" id="resume-modal" role="dialog" aria-modal="true">
+      <div class="modal-card narrow">
+        <div class="modal-head">
+          <h2>Resume exploration</h2>
+        </div>
+        <p class="muted">Continues from saved memory and looks for new areas; compares against previous docs.</p>
+        <div class="cfg-field">
+          <label>Target password (required to re-authenticate)</label>
+          <input class="field" id="resume-password" type="password" autocomplete="current-password" />
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="ghost compact" id="resume-cancel">Cancel</button>
+          <button type="button" class="primary compact" id="resume-confirm">Resume</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="ai-modal" role="dialog" aria-modal="true">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2>Bring your own key</h2>
+        </div>
+        <p class="muted">API keys are sent only for generation requests and are never stored on the server.</p>
+        <div class="cfg-grid">
+          <div class="cfg-field full">
+            <label>Provider</label>
+            <select class="field" id="ai-provider">
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="azure-openai">Azure OpenAI</option>
+            </select>
+          </div>
+          <div class="cfg-field full">
+            <label>Model</label>
+            <input class="field" id="ai-model" type="text" placeholder="gpt-4o-mini" />
+          </div>
+          <div class="cfg-field full">
+            <label>API key</label>
+            <input class="field" id="ai-api-key" type="password" autocomplete="off" />
+          </div>
+          <div class="cfg-field full ai-azure-wrap hidden">
+            <label>Azure endpoint</label>
+            <input class="field" id="ai-azure-endpoint" type="text" placeholder="https://YOUR.openai.azure.com" />
+          </div>
+          <div class="cfg-field full ai-azure-wrap hidden">
+            <label>Azure deployment</label>
+            <input class="field" id="ai-azure-deployment" type="text" placeholder="deployment name" />
+          </div>
+        </div>
+        <div class="ai-usage muted" id="ai-usage-preview">Tokens and estimated cost appear after generation.</div>
+        <div class="modal-foot">
+          <button type="button" class="ghost compact" id="ai-cancel">Cancel</button>
+          <button type="button" class="primary compact" id="ai-save">Save for this browser</button>
+        </div>
+      </div>
+    </div>
 
     <script src="/app.js" type="module"></script>
   </body>

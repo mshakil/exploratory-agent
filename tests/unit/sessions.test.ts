@@ -102,6 +102,30 @@ describeDb("SessionStore (postgres)", () => {
     expect(store.memoryDir(id)).toContain(id);
   });
 
+  it("persists AI doc preference and usage summary without secrets", async () => {
+    const id = createSessionId();
+    await store.ensureSession(id);
+    await store.saveSession(
+      baseSession(id, {
+        docGenerationMode: "ai",
+        aiModules: ["docs"],
+        aiUsage: {
+          promptTokens: 10,
+          completionTokens: 20,
+          totalTokens: 30,
+          estimatedCostUsd: 0.001,
+          provider: "openai",
+          model: "gpt-4o-mini",
+        },
+      }),
+    );
+    const loaded = await store.loadSession(id);
+    expect(loaded?.docGenerationMode).toBe("ai");
+    expect(loaded?.aiModules).toEqual(["docs"]);
+    expect(loaded?.aiUsage?.totalTokens).toBe(30);
+    expect(JSON.stringify(loaded)).not.toMatch(/sk-/i);
+  });
+
   it("keeps two sessions isolated on disk and in db", async () => {
     const a = createSessionId();
     const b = createSessionId();

@@ -144,6 +144,18 @@ data/sessions/<session-id>/
 
 Hand `CONTEXT.md` (or the folder) to a coding agent. Metadata (users, sessions, runs, events) lives in PostgreSQL — not in `session.json` / `events.json`.
 
+## Resume
+
+**Resume** continues from saved session memory (visited pages + prior actions), prefers unfinished / new areas, and still writes a change report against the previous `application.json`. If the session used target-app credentials, the UI prompts for the password again (passwords are never stored).
+
+## AI documentation (BYOK)
+
+Documentation defaults to **System** (deterministic templates from `application.json`).
+
+Optionally choose **AI** output and bring your own key (OpenAI, Anthropic, or Azure OpenAI). The **docs** module rewrites markdown files; `application.json` stays system-generated. API keys are sent only for generation requests and are **never** stored in Postgres. After generation, the UI shows prompt/completion/total tokens and an estimated USD cost (estimate only).
+
+Enrich / explore-hints modules are scaffolded for later.
+
 ## Safety
 
 By default the agent:

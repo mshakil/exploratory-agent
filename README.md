@@ -14,7 +14,7 @@ Optional framework selection adds Playwright or Selenium Java documentation on t
 npm run setup
 ```
 
-This installs dependencies, Playwright Chromium, and builds the CLI.
+This installs dependencies, Playwright Chromium (into a **stable** user cache, not Cursor’s temp sandbox), and builds the CLI.
 
 **PostgreSQL is required** for both the UI and CLI (users, sessions, runs, events). Artifacts stay on disk under `AE_DATA_DIR`.
 
@@ -25,13 +25,31 @@ node scripts/ensure-db.mjs   # create DB if missing
 npm run db:migrate
 ```
 
+### Playwright browsers (stable path)
+
+Cursor / agent sandboxes often set `PLAYWRIGHT_BROWSERS_PATH` under `%TEMP%\cursor-sandbox-cache\…`, which gets wiped — so Chromium appears “missing” again and again.
+
+This project **always** pins browsers to a durable location and launches with an explicit executable path:
+
+| Platform | Default cache |
+|---|---|
+| Windows | `%LOCALAPPDATA%\ms-playwright` |
+| macOS | `~/Library/Caches/ms-playwright` |
+| Linux | `~/.cache/ms-playwright` |
+
+```bash
+npm run prepare:browsers   # install Chromium into the stable cache
+```
+
+Optional override: set `AE_PLAYWRIGHT_BROWSERS_PATH` in `.env`. Do **not** point it at a Temp/sandbox folder. Re-run `prepare:browsers` only after upgrading the `playwright` package.
+
 See [docs/postgres.md](docs/postgres.md) for schema, legacy JSON import, and ops details.
 
 Or step by step without Docker (bring your own Postgres):
 
 ```bash
 npm install
-npx playwright install chromium
+npm run prepare:browsers
 # set DATABASE_URL in .env
 npm run db:migrate
 npm run build
@@ -86,6 +104,7 @@ npm run ui -- --host 0.0.0.0 --port 3847
 | `DATABASE_URL` | **Required.** Postgres connection string |
 | `AE_DATA_DIR` | Artifact root for memory + application-context (default `./data`) |
 | `AE_SESSION_SECRET` | HMAC secret for login cookies (≥16 chars; required in production) |
+| `AE_PLAYWRIGHT_BROWSERS_PATH` | Optional stable Playwright browser cache (overrides Cursor temp sandbox path) |
 | `AE_COOKIE_SECURE=1` | Force `Secure` cookie flag (use behind HTTPS) |
 | `AE_CORS_ORIGIN` | Allowed browser Origin for credentialed CORS (optional) |
 | `AE_CLI_USER_ID` | Optional owner user id for CLI explores (else auto-created `cli` user) |

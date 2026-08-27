@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnvFile } from "../db/load-env.js";
+import { ensurePlaywrightBrowsersPath } from "../browser/ensure-browsers-path.js";
 import { closeDb, migrate, requireDatabaseUrl } from "../db/index.js";
 import { AuthService, toPublicUser, type User } from "../auth/index.js";
 import { SessionManager } from "../sessions/index.js";
@@ -28,6 +29,7 @@ export async function startUiServer(opts: ServeOptions = {}): Promise<{
   close: () => Promise<void>;
 }> {
   await loadEnvFile();
+  ensurePlaywrightBrowsersPath();
   requireDatabaseUrl();
   await migrate();
 

@@ -8,17 +8,17 @@
   },
   "scripts": {
     "build": "tsc && node scripts/copy-migrations.mjs",
-    "dev": "tsx src/cli/index.ts",
-    "start": "node dist/cli/index.js",
-    "ui": "tsx src/cli/index.ts ui",
-    "ui:prod": "node dist/cli/index.js ui",
+    "dev": "node --import ./scripts/preload-playwright-env.mjs ./node_modules/tsx/dist/cli.mjs src/cli/index.ts",
+    "start": "node --import ./scripts/preload-playwright-env.mjs dist/cli/index.js",
+    "ui": "node --import ./scripts/preload-playwright-env.mjs ./node_modules/tsx/dist/cli.mjs src/cli/index.ts ui",
+    "ui:prod": "node --import ./scripts/preload-playwright-env.mjs dist/cli/index.js ui",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:import-json": "tsx src/db/import-json.ts",
     "db:up": "docker compose up -d postgres",
     "test": "vitest run",
     "test:watch": "vitest",
     "demo": "npx serve demo -l 4173 --no-clipboard",
-    "prepare:browsers": "playwright install chromium",
+    "prepare:browsers": "node scripts/install-playwright.mjs",
     "setup": "npm install && npm run prepare:browsers && npm run build"
   },
   "engines": {

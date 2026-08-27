@@ -25,6 +25,10 @@ test-results/
 playwright-report/
 .eslintcache
 
+# Playwright local browser caches (never commit; stable cache lives under user profile)
+.local-browsers/
+ms-playwright/
+
 # Local editor / notes vaults
 .obsidian/
 docs/**/.obsidian/

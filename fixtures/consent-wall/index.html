@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Consent Wall Fixture</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; }
+      main { padding: 2rem; }
+      #consent {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.55);
+        display: grid;
+        place-items: end center;
+        padding: 1.5rem;
+        z-index: 50;
+      }
+      #consent .card {
+        background: #fff;
+        border-radius: 12px;
+        padding: 1.25rem 1.5rem;
+        max-width: 420px;
+        width: 100%;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      }
+      #consent button {
+        margin-right: 0.5rem;
+        margin-top: 0.75rem;
+        padding: 0.5rem 0.9rem;
+        border-radius: 8px;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        cursor: pointer;
+      }
+      #consent #accept-cookies {
+        background: #1d4ed8;
+        color: #fff;
+        border-color: #1d4ed8;
+      }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div id="consent" role="dialog" aria-label="Cookie consent">
+      <div class="card">
+        <strong>We use cookies</strong>
+        <p>Accept cookies to continue to the demo app.</p>
+        <button type="button" id="accept-cookies">Accept all</button>
+        <button type="button" id="reject-cookies">Reject</button>
+      </div>
+    </div>
+    <main id="app" class="hidden">
+      <h1>Consent Wall App</h1>
+      <p>Application content is behind the consent banner.</p>
+      <nav>
+        <a href="#dashboard">Dashboard</a>
+        <a href="#profile">Profile</a>
+      </nav>
+      <button type="button" id="open-profile">Open profile</button>
+      <section id="dashboard">
+        <h2>Dashboard</h2>
+        <button type="button" id="refresh">Refresh</button>
+      </section>
+    </main>
+    <script>
+      document.getElementById("accept-cookies").addEventListener("click", function () {
+        document.getElementById("consent").classList.add("hidden");
+        document.getElementById("app").classList.remove("hidden");
+      });
+      document.getElementById("reject-cookies").addEventListener("click", function () {
+        document.getElementById("consent").classList.add("hidden");
+        document.getElementById("app").classList.remove("hidden");
+      });
+      document.getElementById("open-profile").addEventListener("click", function () {
+        location.hash = "#profile";
+      });
+      document.getElementById("refresh").addEventListener("click", function () {
+        this.textContent = "Refreshed";
+      });
+    </script>
+  </body>
+</html>

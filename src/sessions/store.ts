@@ -1,5 +1,16 @@
-import { access, mkdir, readdir, readFile, rename, rm, unlink, writeFile, stat } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { and, asc, desc, eq } from "drizzle-orm";
+import type { Db } from "../db/client.js";
+import { getDb } from "../db/client.js";
+import {
+  explorationEvents,
+  explorationRuns,
+  explorationSessions,
+  type EventRow,
+  type RunRow,
+  type SessionRow,
+} from "../db/schema.js";
 import {
   ExplorationEventSchema,
   ExplorationRunSchema,
@@ -7,13 +18,104 @@ import {
   type ExplorationEvent,
   type ExplorationRun,
   type ExplorationSession,
+  type ListSessionsFilter,
+  type RunStatistics,
 } from "./types.js";
 
-export class SessionStore {
-  /** Serialize writes per file path to avoid interleaved JSON corruption. */
-  private readonly writeQueues = new Map<string, Promise<void>>();
+function contextRelpath(sessionId: string): string {
+  return path.posix.join("sessions", sessionId, "application-context");
+}
 
-  constructor(private readonly rootDir: string) {}
+function memoryRelpath(sessionId: string): string {
+  return path.posix.join("sessions", sessionId, "memory");
+}
+
+function toIso(value: string | Date | null | undefined): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "string") return value;
+  return value.toISOString();
+}
+
+function sessionFromRow(row: SessionRow, dataRoot: string): ExplorationSession {
+  const statistics = {
+    pages: row.statsPages,
+    elements: row.statsElements,
+    actions: row.statsActions,
+    flows: row.statsFlows,
+    skipped: row.statsSkipped,
+  };
+  const latestChanges = row.latestChanges
+    ? (row.latestChanges as RunStatistics)
+    : undefined;
+
+  const raw = {
+    id: row.id,
+    applicationName: row.applicationName,
+    applicationUrl: row.applicationUrl,
+    username: row.targetUsername ?? undefined,
+    framework: row.framework,
+    status: row.status,
+    createdAt: toIso(row.createdAt)!,
+    updatedAt: toIso(row.updatedAt)!,
+    startedAt: toIso(row.startedAt),
+    completedAt: toIso(row.completedAt),
+    error: row.error ?? undefined,
+    currentExplorationId: row.currentExplorationId ?? undefined,
+    statistics,
+    contextPath: path.join(dataRoot, row.contextRelpath),
+    memoryPath: path.join(dataRoot, row.memoryRelpath),
+    ownerUserId: row.ownerUserId,
+    latestChanges,
+    stabilityProfile: row.stabilityProfile ?? undefined,
+    authMode: row.authMode ?? undefined,
+    domainAllowlist: row.domainAllowlist ?? undefined,
+    exploreOpenShadow: row.exploreOpenShadow ?? undefined,
+    exploreSameOriginFrames: row.exploreSameOriginFrames ?? undefined,
+    dismissConsent: row.dismissConsent ?? undefined,
+  };
+
+  return ExplorationSessionSchema.parse(raw);
+}
+
+function runFromRow(row: RunRow): ExplorationRun {
+  return ExplorationRunSchema.parse({
+    id: row.id,
+    sessionId: row.sessionId,
+    type: row.type,
+    startedAt: toIso(row.startedAt)!,
+    completedAt: toIso(row.completedAt),
+    status: row.status,
+    statistics: row.statistics ?? {},
+    changeReportPath: row.changeReportRelpath ?? undefined,
+  });
+}
+
+function eventFromRow(row: EventRow): ExplorationEvent {
+  return ExplorationEventSchema.parse({
+    id: row.id,
+    sessionId: row.sessionId,
+    timestamp: toIso(row.ts)!,
+    type: row.type,
+    title: row.title,
+    description: row.description ?? undefined,
+    metadata: row.metadata ?? undefined,
+    status: row.status,
+  });
+}
+
+export class SessionStore {
+  private readonly db: Db;
+
+  constructor(
+    private readonly dataRoot: string,
+    db?: Db,
+  ) {
+    this.db = db ?? getDb();
+  }
+
+  get rootDir(): string {
+    return path.join(this.dataRoot, "sessions");
+  }
 
   sessionDir(sessionId: string): string {
     return path.join(this.rootDir, sessionId);
@@ -27,22 +129,6 @@ export class SessionStore {
     return path.join(this.sessionDir(sessionId), "memory");
   }
 
-  runsDir(sessionId: string): string {
-    return path.join(this.sessionDir(sessionId), "exploration-runs");
-  }
-
-  private sessionFile(sessionId: string): string {
-    return path.join(this.sessionDir(sessionId), "session.json");
-  }
-
-  private eventsFile(sessionId: string): string {
-    return path.join(this.sessionDir(sessionId), "events.json");
-  }
-
-  private runFile(sessionId: string, runId: string): string {
-    return path.join(this.runsDir(sessionId), `${runId}.json`);
-  }
-
   async ensureRoot(): Promise<void> {
     await mkdir(this.rootDir, { recursive: true });
   }
@@ -51,80 +137,161 @@ export class SessionStore {
     await mkdir(this.sessionDir(sessionId), { recursive: true });
     await mkdir(this.contextDir(sessionId), { recursive: true });
     await mkdir(this.memoryDir(sessionId), { recursive: true });
-    await mkdir(this.runsDir(sessionId), { recursive: true });
   }
 
   async saveSession(session: ExplorationSession): Promise<void> {
+    if (!session.ownerUserId?.trim()) {
+      throw new Error("ownerUserId is required to persist a session");
+    }
     await this.ensureSession(session.id);
     const parsed = ExplorationSessionSchema.parse(session);
-    await this.writeJsonAtomic(this.sessionFile(session.id), parsed);
+
+    const values = {
+      id: parsed.id,
+      ownerUserId: parsed.ownerUserId!,
+      applicationName: parsed.applicationName,
+      applicationUrl: parsed.applicationUrl,
+      targetUsername: parsed.username ?? null,
+      framework: parsed.framework,
+      status: parsed.status,
+      createdAt: parsed.createdAt,
+      updatedAt: parsed.updatedAt,
+      startedAt: parsed.startedAt ?? null,
+      completedAt: parsed.completedAt ?? null,
+      error: parsed.error ?? null,
+      currentExplorationId: parsed.currentExplorationId ?? null,
+      statsPages: parsed.statistics.pages,
+      statsElements: parsed.statistics.elements,
+      statsActions: parsed.statistics.actions,
+      statsFlows: parsed.statistics.flows,
+      statsSkipped: parsed.statistics.skipped ?? 0,
+      contextRelpath: contextRelpath(parsed.id),
+      memoryRelpath: memoryRelpath(parsed.id),
+      stabilityProfile: parsed.stabilityProfile ?? null,
+      authMode: parsed.authMode ?? null,
+      domainAllowlist: parsed.domainAllowlist ?? [],
+      exploreOpenShadow: parsed.exploreOpenShadow ?? null,
+      exploreSameOriginFrames: parsed.exploreSameOriginFrames ?? null,
+      dismissConsent: parsed.dismissConsent ?? null,
+      latestChanges: parsed.latestChanges ?? null,
+    };
+
+    await this.db
+      .insert(explorationSessions)
+      .values(values)
+      .onConflictDoUpdate({
+        target: explorationSessions.id,
+        set: {
+          ownerUserId: values.ownerUserId,
+          applicationName: values.applicationName,
+          applicationUrl: values.applicationUrl,
+          targetUsername: values.targetUsername,
+          framework: values.framework,
+          status: values.status,
+          updatedAt: values.updatedAt,
+          startedAt: values.startedAt,
+          completedAt: values.completedAt,
+          error: values.error,
+          currentExplorationId: values.currentExplorationId,
+          statsPages: values.statsPages,
+          statsElements: values.statsElements,
+          statsActions: values.statsActions,
+          statsFlows: values.statsFlows,
+          statsSkipped: values.statsSkipped,
+          contextRelpath: values.contextRelpath,
+          memoryRelpath: values.memoryRelpath,
+          stabilityProfile: values.stabilityProfile,
+          authMode: values.authMode,
+          domainAllowlist: values.domainAllowlist,
+          exploreOpenShadow: values.exploreOpenShadow,
+          exploreSameOriginFrames: values.exploreSameOriginFrames,
+          dismissConsent: values.dismissConsent,
+          latestChanges: values.latestChanges,
+        },
+      });
   }
 
   async loadSession(sessionId: string): Promise<ExplorationSession | null> {
-    try {
-      const text = await readFile(this.sessionFile(sessionId), "utf8");
-      const raw = JSON.parse(text) as Record<string, unknown>;
-      // Backward compat: older sessions lack updatedAt / framework
-      if (!raw.updatedAt) raw.updatedAt = (raw.completedAt as string) || (raw.createdAt as string);
-      if (!raw.framework) raw.framework = "independent";
-      return ExplorationSessionSchema.parse(raw);
-    } catch {
-      return null;
-    }
+    const rows = await this.db
+      .select()
+      .from(explorationSessions)
+      .where(eq(explorationSessions.id, sessionId))
+      .limit(1);
+    if (!rows[0]) return null;
+    return sessionFromRow(rows[0], this.dataRoot);
   }
 
-  async listSessions(): Promise<ExplorationSession[]> {
+  async listSessions(filter?: ListSessionsFilter): Promise<ExplorationSession[]> {
     await this.ensureRoot();
-    let entries: string[];
-    try {
-      entries = await readdir(this.rootDir);
-    } catch {
-      return [];
+    let rows: SessionRow[];
+    if (filter?.admin) {
+      rows = await this.db
+        .select()
+        .from(explorationSessions)
+        .orderBy(desc(explorationSessions.updatedAt));
+    } else if (filter?.ownerUserId) {
+      rows = await this.db
+        .select()
+        .from(explorationSessions)
+        .where(eq(explorationSessions.ownerUserId, filter.ownerUserId))
+        .orderBy(desc(explorationSessions.updatedAt));
+    } else {
+      rows = await this.db
+        .select()
+        .from(explorationSessions)
+        .orderBy(desc(explorationSessions.updatedAt));
     }
-
-    const sessions: ExplorationSession[] = [];
-    for (const entry of entries) {
-      const session = await this.loadSession(entry);
-      if (session) sessions.push(session);
-    }
-
-    return sessions.sort(
-      (a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime(),
-    );
+    return rows.map((r) => sessionFromRow(r, this.dataRoot));
   }
 
   async saveRun(run: ExplorationRun): Promise<void> {
     await this.ensureSession(run.sessionId);
     const parsed = ExplorationRunSchema.parse(run);
-    await this.writeJsonAtomic(this.runFile(run.sessionId, run.id), parsed);
+    const values = {
+      id: parsed.id,
+      sessionId: parsed.sessionId,
+      type: parsed.type,
+      startedAt: parsed.startedAt,
+      completedAt: parsed.completedAt ?? null,
+      status: parsed.status,
+      statistics: parsed.statistics as Record<string, number>,
+      changeReportRelpath: parsed.changeReportPath ?? null,
+    };
+    await this.db
+      .insert(explorationRuns)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [explorationRuns.sessionId, explorationRuns.id],
+        set: {
+          type: values.type,
+          startedAt: values.startedAt,
+          completedAt: values.completedAt,
+          status: values.status,
+          statistics: values.statistics,
+          changeReportRelpath: values.changeReportRelpath,
+        },
+      });
   }
 
   async loadRun(sessionId: string, runId: string): Promise<ExplorationRun | null> {
-    try {
-      const text = await readFile(this.runFile(sessionId, runId), "utf8");
-      return ExplorationRunSchema.parse(JSON.parse(text));
-    } catch {
-      return null;
-    }
+    const rows = await this.db
+      .select()
+      .from(explorationRuns)
+      .where(
+        and(eq(explorationRuns.sessionId, sessionId), eq(explorationRuns.id, runId)),
+      )
+      .limit(1);
+    return rows[0] ? runFromRow(rows[0]) : null;
   }
 
   async listRuns(sessionId: string): Promise<ExplorationRun[]> {
     await this.ensureSession(sessionId);
-    let entries: string[];
-    try {
-      entries = await readdir(this.runsDir(sessionId));
-    } catch {
-      return [];
-    }
-    const runs: ExplorationRun[] = [];
-    for (const entry of entries) {
-      if (!entry.endsWith(".json")) continue;
-      const run = await this.loadRun(sessionId, entry.replace(/\.json$/, ""));
-      if (run) runs.push(run);
-    }
-    return runs.sort(
-      (a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime(),
-    );
+    const rows = await this.db
+      .select()
+      .from(explorationRuns)
+      .where(eq(explorationRuns.sessionId, sessionId))
+      .orderBy(asc(explorationRuns.startedAt));
+    return rows.map(runFromRow);
   }
 
   async nextRunId(sessionId: string): Promise<string> {
@@ -133,7 +300,6 @@ export class SessionStore {
     return `exploration-${String(n).padStart(3, "0")}`;
   }
 
-  /** Load application graph (pages + transitions) from session memory. */
   async loadGraph(sessionId: string): Promise<{
     pages: Array<Record<string, unknown>>;
     transitions: Array<Record<string, unknown>>;
@@ -151,7 +317,6 @@ export class SessionStore {
     let pages = await readArr(path.join(dir, "pages.json"));
     let transitions = await readArr(path.join(dir, "transitions.json"));
 
-    // Fallback for sessions that only have application-context written
     if (pages.length === 0) {
       try {
         const text = await readFile(
@@ -172,26 +337,41 @@ export class SessionStore {
     return { pages, transitions };
   }
 
-  async saveEvents(sessionId: string, events: ExplorationEvent[]): Promise<void> {
-    await this.ensureSession(sessionId);
-    const parsed = events.map((e) => ExplorationEventSchema.parse(e));
-    await this.writeJsonAtomic(this.eventsFile(sessionId), parsed);
+  async appendEvent(sessionId: string, event: ExplorationEvent): Promise<void> {
+    const parsed = ExplorationEventSchema.parse(event);
+    await this.db.insert(explorationEvents).values({
+      id: parsed.id,
+      sessionId,
+      ts: parsed.timestamp,
+      type: parsed.type,
+      title: parsed.title,
+      description: parsed.description ?? null,
+      metadata: (parsed.metadata as Record<string, unknown> | undefined) ?? null,
+      status: parsed.status,
+    });
   }
 
   async loadEvents(sessionId: string): Promise<ExplorationEvent[]> {
-    try {
-      const raw = JSON.parse(await readFile(this.eventsFile(sessionId), "utf8")) as unknown[];
-      return raw.map((e) => ExplorationEventSchema.parse(e));
-    } catch {
-      return [];
-    }
+    const rows = await this.db
+      .select()
+      .from(explorationEvents)
+      .where(eq(explorationEvents.sessionId, sessionId))
+      .orderBy(asc(explorationEvents.seq));
+    return rows.map(eventFromRow);
   }
 
-  async appendEvent(sessionId: string, event: ExplorationEvent): Promise<ExplorationEvent[]> {
-    const events = await this.loadEvents(sessionId);
-    events.push(ExplorationEventSchema.parse(event));
-    await this.saveEvents(sessionId, events);
-    return events;
+  async clearEvents(sessionId: string): Promise<void> {
+    await this.db
+      .delete(explorationEvents)
+      .where(eq(explorationEvents.sessionId, sessionId));
+  }
+
+  /** @deprecated Prefer appendEvent; kept for tests that seed a full list. */
+  async saveEvents(sessionId: string, events: ExplorationEvent[]): Promise<void> {
+    await this.clearEvents(sessionId);
+    for (const event of events) {
+      await this.appendEvent(sessionId, event);
+    }
   }
 
   async documentExists(sessionId: string, name: string): Promise<boolean> {
@@ -199,7 +379,6 @@ export class SessionStore {
       await access(path.join(this.contextDir(sessionId), name));
       return true;
     } catch {
-      // Also check nested paths like framework/playwright.md
       try {
         await access(path.join(this.contextDir(sessionId), ...name.split("/")));
         return true;
@@ -226,7 +405,6 @@ export class SessionStore {
     }
   }
 
-  /** List change report files under application-context/changes/. */
   async listChangeReports(sessionId: string): Promise<string[]> {
     const dir = path.join(this.contextDir(sessionId), "changes");
     try {
@@ -237,7 +415,6 @@ export class SessionStore {
     }
   }
 
-  /** List framework docs under application-context/framework/. */
   async listFrameworkDocs(sessionId: string): Promise<string[]> {
     const dir = path.join(this.contextDir(sessionId), "framework");
     try {
@@ -252,7 +429,6 @@ export class SessionStore {
     return path.join(this.contextDir(sessionId), ...name.split("/"));
   }
 
-  /** Delete generated application-context documents for a session. */
   async clearContext(sessionId: string): Promise<number> {
     const dir = this.contextDir(sessionId);
     let removed = 0;
@@ -271,29 +447,11 @@ export class SessionStore {
     return removed;
   }
 
-  /** Permanently delete a session directory and all of its data. */
   async deleteSession(sessionId: string): Promise<void> {
+    await this.db
+      .delete(explorationSessions)
+      .where(eq(explorationSessions.id, sessionId));
     await rm(this.sessionDir(sessionId), { recursive: true, force: true });
-  }
-
-  /** Queue + temp-file rename so concurrent writers cannot interleave JSON. */
-  private writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
-    const prev = this.writeQueues.get(filePath) ?? Promise.resolve();
-    const next = prev
-      .catch(() => undefined)
-      .then(async () => {
-        const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-        const payload = JSON.stringify(data, null, 2);
-        await writeFile(tmp, payload, "utf8");
-        try {
-          await rename(tmp, filePath);
-        } catch {
-          await unlink(filePath).catch(() => undefined);
-          await rename(tmp, filePath);
-        }
-      });
-    this.writeQueues.set(filePath, next);
-    return next;
   }
 }
 
@@ -303,7 +461,6 @@ export function createSessionId(): string {
   return `session-${stamp}-${rand}`;
 }
 
-/** Derive a human-readable application name from a URL (and optional page title). */
 export function deriveApplicationName(url: string, pageTitle?: string): string {
   const cleanedTitle = pageTitle?.trim();
   if (cleanedTitle && cleanedTitle.length > 0 && cleanedTitle.toLowerCase() !== "untitled") {

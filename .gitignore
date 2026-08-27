@@ -25,6 +25,11 @@ test-results/
 playwright-report/
 .eslintcache
 
+# Local editor / notes vaults
+.obsidian/
+docs/**/.obsidian/
+docs/exploratory-agent/
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -32,3 +37,4 @@ Thumbs.db
 .idea/
 .vscode/
 *.code-workspace
+*.local

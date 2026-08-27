@@ -7,11 +7,14 @@
     "agent-explorer": "./dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-migrations.mjs",
     "dev": "tsx src/cli/index.ts",
     "start": "node dist/cli/index.js",
     "ui": "tsx src/cli/index.ts ui",
     "ui:prod": "node dist/cli/index.js ui",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:import-json": "tsx src/db/import-json.ts",
+    "db:up": "docker compose up -d postgres",
     "test": "vitest run",
     "test:watch": "vitest",
     "demo": "npx serve demo -l 4173 --no-clipboard",
@@ -31,11 +34,15 @@
   "license": "MIT",
   "dependencies": {
     "commander": "^13.1.0",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.51.0",
     "@types/node": "^22.13.10",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.10",
     "playwright": "^1.51.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",

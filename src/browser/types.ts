@@ -65,7 +65,7 @@ export interface BrowserAdapter {
   select(element: ElementReference, value: string): Promise<ActionResult>;
   check(element: ElementReference, checked?: boolean): Promise<ActionResult>;
   getState(): Promise<PageState>;
-  waitForStability(timeoutMs?: number): Promise<void>;
+  waitForStability(timeoutMs?: number, profile?: import("../models/index.js").StabilityProfile): Promise<void>;
   goBack(): Promise<void>;
   saveStorageState(path: string): Promise<void>;
 }

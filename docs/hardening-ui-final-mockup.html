@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Locked UI Mockup (A + C) — Application Explorer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #f6f5f2;
+        --surface: #ffffff;
+        --line: #e6e3dc;
+        --text: #161616;
+        --muted: #6a6a6a;
+        --faint: #9a9690;
+        --accent: #1d4ed8;
+        --accent-soft: #eef2ff;
+        --ok: #15803d;
+        --ok-bg: #f0fdf4;
+        --warn: #c2410c;
+        --warn-bg: #fff7ed;
+        --font: "DM Sans", "Segoe UI", sans-serif;
+        --mono: "JetBrains Mono", ui-monospace, monospace;
+        --radius: 12px;
+      }
+      [data-theme="dark"] {
+        --bg: #111318;
+        --surface: #1a1d24;
+        --line: #2b303b;
+        --text: #eceef2;
+        --muted: #9aa3b2;
+        --faint: #6b7380;
+        --accent: #60a5fa;
+        --accent-soft: #1e293b;
+        --ok: #4ade80;
+        --ok-bg: #14532d;
+        --warn: #fdba74;
+        --warn-bg: #3b2410;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        font-family: var(--font);
+        background: var(--bg);
+        color: var(--text);
+      }
+      .banner {
+        text-align: center;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        padding: 9px 16px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--muted);
+      }
+      .banner a { color: var(--accent); }
+      .scene-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .scene-bar label {
+        font-size: 12px;
+        color: var(--muted);
+        margin-right: 4px;
+      }
+      .scene-btn {
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 6px 12px;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .scene-btn.active {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .scene-bar .spacer { flex: 1; }
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .brand { display: flex; gap: 12px; align-items: center; }
+      .mark {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        display: grid;
+        place-items: center;
+      }
+      .mark svg {
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.7;
+      }
+      .brand h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .brand p {
+        margin: 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 9px;
+        padding: 10px 14px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+      button.ghost {
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        padding: 8px 12px;
+        font: inherit;
+        font-size: 13px;
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.linkish {
+        background: none;
+        border: none;
+        color: var(--accent);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0;
+      }
+      input.url, input.field, textarea.field, select.field {
+        width: 100%;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--text);
+        border-radius: 9px;
+        padding: 10px 12px;
+        font: inherit;
+        font-size: 14px;
+      }
+      textarea.field {
+        min-height: 72px;
+        resize: vertical;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .muted { color: var(--muted); font-size: 12px; }
+      .mono { font-family: var(--mono); font-size: 11px; }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: var(--ok-bg);
+        color: var(--ok);
+      }
+      .pill.dot::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .pill.paused { background: var(--warn-bg); color: var(--warn); }
+      .pill.idle {
+        background: var(--bg);
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
+
+      /* ===== Empty (C) ===== */
+      .empty {
+        max-width: 440px;
+        margin: 72px auto 48px;
+        text-align: center;
+        padding: 0 20px;
+      }
+      .empty h2 {
+        margin: 0 0 8px;
+        font-size: 26px;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+      }
+      .empty > p {
+        margin: 0 0 24px;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      .empty-form {
+        text-align: left;
+        display: grid;
+        gap: 12px;
+      }
+      .empty-form .actions {
+        display: grid;
+        gap: 10px;
+      }
+      .config-panel {
+        display: none;
+        text-align: left;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 14px;
+        background: var(--surface);
+        margin-top: 4px;
+      }
+      .config-panel.open { display: block; }
+      .config-panel h3 {
+        margin: 0 0 10px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+      .cfg-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .cfg-field label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .cfg-field.full { grid-column: 1 / -1; }
+      .profiles {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+      }
+      .profile {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .profile.active {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      .checks {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        margin-top: 10px;
+      }
+
+      /* ===== Workspace (A) ===== */
+      .workspace {
+        display: none;
+        grid-template-columns: 300px minmax(0, 1fr);
+        gap: 0;
+        min-height: calc(100vh - 150px);
+        max-width: 1200px;
+        margin: 0 auto;
+        border-left: 1px solid var(--line);
+        border-right: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .workspace.show { display: grid; }
+      @media (max-width: 860px) {
+        .workspace.show { grid-template-columns: 1fr; }
+      }
+      .left {
+        border-right: 1px solid var(--line);
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        background: var(--bg);
+      }
+      .left h2 {
+        margin: 0 0 10px;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .session {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        margin-bottom: 6px;
+        background: transparent;
+        width: 100%;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+      }
+      .session:hover { background: var(--surface); }
+      .session.active {
+        background: var(--surface);
+        border-color: var(--line);
+      }
+      .session strong { display: block; font-size: 13px; }
+      .session .sub {
+        font-size: 11px;
+        color: var(--muted);
+        font-family: var(--mono);
+        margin-top: 2px;
+      }
+      .main {
+        padding: 20px 24px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 560px;
+      }
+      .main-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .main-head h2 {
+        margin: 0 0 4px;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      .stream {
+        flex: 1;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--bg);
+        overflow: auto;
+        min-height: 300px;
+      }
+      .ev {
+        display: grid;
+        grid-template-columns: 56px 1fr;
+        gap: 12px;
+        padding: 10px 14px;
+        font-size: 13px;
+        border-bottom: 1px solid var(--line);
+      }
+      .ev:last-child { border-bottom: none; }
+      .ev time {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      .ev .skip {
+        display: inline-block;
+        margin-left: 6px;
+        font-size: 11px;
+        color: var(--warn);
+        background: var(--warn-bg);
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-family: var(--mono);
+      }
+      .foot {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+        padding-top: 4px;
+      }
+      .stat b {
+        display: block;
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .stat span {
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .foot-links {
+        margin-left: auto;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .limit {
+        display: none;
+        background: var(--warn-bg);
+        color: var(--warn);
+        border-radius: 9px;
+        padding: 10px 12px;
+        font-size: 12px;
+      }
+      .limit.show { display: block; }
+      .drawer {
+        display: none;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+        background: var(--surface);
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .drawer.open { display: block; }
+      .side-sheet {
+        display: none;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 14px 16px;
+        background: var(--bg);
+      }
+      .side-sheet.open { display: block; }
+      .side-sheet h3 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .kv {
+        display: grid;
+        grid-template-columns: 110px 1fr;
+        gap: 6px 12px;
+        font-size: 12px;
+      }
+      .kv dt { color: var(--muted); margin: 0; }
+      .kv dd { margin: 0; }
+      .doc-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 13px;
+      }
+      .doc-row:last-child { border-bottom: none; }
+      .sso {
+        display: none;
+        background: var(--warn-bg);
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-size: 13px;
+      }
+      .sso.show { display: block; }
+      .sso strong { display: block; margin-bottom: 4px; }
+      .sso .row { display: flex; gap: 8px; margin-top: 10px; }
+      .note {
+        max-width: 1200px;
+        margin: 0 auto 32px;
+        padding: 0 20px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .note a { color: var(--accent); }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="banner">
+      Locked UI requirement · Option <strong>A + C</strong> · dummy data ·
+      acceptance visual for hardening ·
+      <a href="./hardening-real-apps.md">hardening-real-apps.md</a>
+    </div>
+
+    <div class="scene-bar">
+      <label>Preview</label>
+      <button type="button" class="scene-btn active" data-scene="empty">1 · Empty (C)</button>
+      <button type="button" class="scene-btn" data-scene="exploring">2 · Exploring (A)</button>
+      <button type="button" class="scene-btn" data-scene="paused">3 · Paused</button>
+      <button type="button" class="scene-btn" data-scene="sso">4 · Manual SSO</button>
+      <button type="button" class="scene-btn" data-scene="done">5 · Completed</button>
+      <span class="spacer"></span>
+      <button type="button" class="ghost" id="btn-theme" style="padding: 6px 10px; font-size: 12px;">Theme</button>
+    </div>
+
+    <header class="top">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>
+        </span>
+        <div>
+          <h1>Application Explorer</h1>
+          <p>Explore. Understand. Automate.</p>
+        </div>
+      </div>
+      <span class="pill idle" id="top-pill">No sessions</span>
+    </header>
+
+    <!-- ========== C: Empty ========== -->
+    <section class="empty" id="view-empty">
+      <h2>Explore an application</h2>
+      <p>Enter a URL to discover pages, flows, and selectors. Optional login and depth settings stay out of the way.</p>
+      <div class="empty-form">
+        <input class="url" type="url" value="https://app.company.com/dashboard" aria-label="Application URL" />
+        <div class="actions">
+          <button type="button" class="primary" id="btn-empty-start">Start exploring</button>
+          <button type="button" class="linkish" id="btn-empty-config" style="justify-self: center;">Optional settings</button>
+        </div>
+        <div class="config-panel" id="empty-config">
+          <h3>Optional settings</h3>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <label>Username</label>
+              <input class="field" value="admin" />
+            </div>
+            <div class="cfg-field">
+              <label>Password</label>
+              <input class="field" type="password" value="password" />
+            </div>
+            <div class="cfg-field full">
+              <label>Framework</label>
+              <select class="field">
+                <option>Framework Independent</option>
+                <option selected>Playwright</option>
+                <option>Selenium Java</option>
+              </select>
+            </div>
+            <div class="cfg-field full">
+              <label>Auth mode</label>
+              <select class="field">
+                <option>None</option>
+                <option selected>Username / password</option>
+                <option>Playwright storage state</option>
+                <option>Manual SSO (headed)</option>
+              </select>
+            </div>
+            <div class="cfg-field full">
+              <label>Exploration profile</label>
+              <div class="profiles" id="empty-profiles">
+                <button type="button" class="profile" data-p="fast">Fast</button>
+                <button type="button" class="profile active" data-p="balanced">Balanced</button>
+                <button type="button" class="profile" data-p="deep">Deep</button>
+              </div>
+            </div>
+            <div class="cfg-field full">
+              <label>Domain allowlist</label>
+              <textarea class="field">app.company.com
+login.company.com</textarea>
+            </div>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" checked /> Dismiss cookie / consent banners</label>
+            <label><input type="checkbox" /> Explore open Shadow DOM</label>
+            <label><input type="checkbox" /> Explore same-origin iframes</label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== A: Workspace ========== -->
+    <main class="workspace" id="view-workspace">
+      <aside class="left">
+        <div>
+          <h2>New exploration</h2>
+          <input class="url" value="https://staging.acme.io" aria-label="URL" />
+          <div style="margin-top: 10px; display: grid; gap: 8px;">
+            <button type="button" class="primary">Start exploring</button>
+            <button type="button" class="linkish" id="btn-ws-config">Configure…</button>
+          </div>
+          <div class="drawer" id="ws-config">
+            Auth, framework, Fast / Balanced / Deep, allowlist, shadow &amp; frames — same controls as empty-state optional settings, tucked away here.
+          </div>
+        </div>
+        <div>
+          <div class="section-label">Sessions</div>
+          <button type="button" class="session active" data-session="acme">
+            <strong>Acme Console</strong>
+            <div class="sub">app.company.com</div>
+          </button>
+          <button type="button" class="session" data-session="demo">
+            <strong>Demo CRM</strong>
+            <div class="sub">127.0.0.1:4173</div>
+          </button>
+          <button type="button" class="session" data-session="hr">
+            <strong>HR Portal</strong>
+            <div class="sub">hr.internal.corp</div>
+          </button>
+        </div>
+      </aside>
+
+      <section class="main">
+        <div class="main-head">
+          <div>
+            <h2 id="app-name">Acme Console</h2>
+            <div class="muted mono" id="app-meta">app.company.com · Playwright · Balanced</div>
+          </div>
+          <div class="head-actions">
+            <button type="button" class="ghost" id="btn-pause">Pause</button>
+            <button type="button" class="ghost hidden" id="btn-resume">Resume</button>
+            <button type="button" class="ghost" id="btn-stop">Stop</button>
+          </div>
+        </div>
+
+        <div class="sso" id="sso-banner">
+          <strong>Waiting for manual login</strong>
+          Complete SSO in the headed browser, then continue.
+          <div class="row">
+            <button type="button" class="primary" style="padding: 8px 12px;">Continue exploration</button>
+            <button type="button" class="ghost" style="padding: 8px 12px;">Stop</button>
+          </div>
+        </div>
+
+        <div class="limit" id="limit-banner">
+          <strong>Exploration limitations</strong> — 9 actions skipped · 2 blocked surfaces.
+          Notes are included in CONTEXT.md.
+        </div>
+
+        <div class="stream" id="stream">
+          <!-- filled by JS -->
+        </div>
+
+        <div class="side-sheet" id="sheet-details">
+          <h3>Details</h3>
+          <dl class="kv">
+            <dt>Profile</dt><dd>Balanced</dd>
+            <dt>Auth</dt><dd>Username / password</dd>
+            <dt>Coverage</dt><dd>Main 146 · Shadow 12 · Frames 8 · Skipped 9</dd>
+            <dt>Top skips</dt><dd>destructive ×4 · cross-origin-frame ×2 · overlay-blocked ×2 · closed-shadow ×1</dd>
+            <dt>Restore fails</dt><dd>2</dd>
+            <dt>Allowlist</dt><dd class="mono">app.company.com, login.company.com</dd>
+          </dl>
+        </div>
+
+        <div class="side-sheet" id="sheet-docs">
+          <h3>Documents</h3>
+          <div class="doc-row"><span>CONTEXT.md</span><button type="button" class="linkish">Download</button></div>
+          <div class="doc-row"><span>application.json</span><button type="button" class="linkish">Download</button></div>
+          <div class="doc-row"><span>pages.md</span><button type="button" class="linkish">Download</button></div>
+          <div class="doc-row"><span>flows.md</span><button type="button" class="linkish">Download</button></div>
+          <div class="doc-row"><span>framework/playwright.md</span><button type="button" class="linkish">Download</button></div>
+          <div style="margin-top: 12px;">
+            <button type="button" class="primary" style="width: 100%;">Download all (.zip)</button>
+          </div>
+        </div>
+
+        <div class="foot">
+          <div class="stat"><b id="n-pages">7</b><span>Pages</span></div>
+          <div class="stat"><b id="n-els">146</b><span>Elements</span></div>
+          <div class="stat"><b id="n-skip">9</b><span>Skipped</span></div>
+          <div class="stat"><b id="n-eta">12:40</b><span>Remaining</span></div>
+          <div class="foot-links">
+            <button type="button" class="linkish" id="btn-details">Details</button>
+            <button type="button" class="linkish" id="btn-docs">Docs</button>
+            <button type="button" class="primary hidden" id="btn-resume-ctx" style="padding: 8px 12px;">Resume exploration</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <p class="note">
+      <strong>Locked:</strong> empty state = C (URL + Start; Optional settings collapsed).
+      Workspace = A (sessions + live stream; Configure / Details / Docs on demand).
+      Scene switcher is for review only — not part of the product UI.
+      Spec: <a href="./hardening-real-apps.md">hardening-real-apps.md</a>.
+    </p>
+
+    <script>
+      (function () {
+        var eventsExploring = [
+          ["12:41:02", "/dashboard"],
+          ["12:41:03", "Discovered 24 elements (main 20 · shadow 4)"],
+          ["12:41:04", "Skipped Delete User", "destructive"],
+          ["12:41:05", "Skipped Billing frame", "cross-origin-frame"],
+          ["12:41:06", "Clicked Settings tab"],
+          ["12:41:07", "State restored · fingerprint a3f2…"],
+          ["12:41:18", "Opened Users"],
+          ["12:41:22", "Filled Create User form with synthetic data"],
+          ["12:41:25", "Skipped Empty trash", "destructive"],
+        ];
+        var eventsPaused = eventsExploring.concat([
+          ["12:42:10", "Exploration paused by user"],
+        ]);
+        var eventsSso = [
+          ["12:40:01", "Browser launched (headed)"],
+          ["12:40:02", "Auth mode: manual SSO — waiting for Continue"],
+        ];
+        var eventsDone = eventsExploring.concat([
+          ["12:44:01", "Exploration completed"],
+          ["12:44:02", "Wrote CONTEXT.md · application.json · 5 framework docs"],
+          ["12:44:03", "9 skips recorded in limitations"],
+        ]);
+
+        var stream = document.getElementById("stream");
+        var empty = document.getElementById("view-empty");
+        var workspace = document.getElementById("view-workspace");
+        var topPill = document.getElementById("top-pill");
+        var pauseBtn = document.getElementById("btn-pause");
+        var resumeBtn = document.getElementById("btn-resume");
+        var resumeCtx = document.getElementById("btn-resume-ctx");
+        var limit = document.getElementById("limit-banner");
+        var sso = document.getElementById("sso-banner");
+        var eta = document.getElementById("n-eta");
+
+        function renderEvents(list) {
+          stream.innerHTML = list
+            .map(function (row) {
+              var skip = row[2]
+                ? '<span class="skip">' + row[2] + "</span>"
+                : "";
+              return (
+                '<div class="ev"><time>' +
+                row[0] +
+                "</time><div>" +
+                row[1] +
+                skip +
+                "</div></div>"
+              );
+            })
+            .join("");
+        }
+
+        function closeSheets() {
+          document.getElementById("sheet-details").classList.remove("open");
+          document.getElementById("sheet-docs").classList.remove("open");
+        }
+
+        function setScene(name) {
+          document.querySelectorAll(".scene-btn").forEach(function (b) {
+            b.classList.toggle("active", b.dataset.scene === name);
+          });
+          closeSheets();
+          sso.classList.remove("show");
+          limit.classList.remove("show");
+          resumeCtx.classList.add("hidden");
+          pauseBtn.classList.remove("hidden");
+          resumeBtn.classList.add("hidden");
+          pauseBtn.disabled = false;
+          document.getElementById("btn-stop").disabled = false;
+
+          if (name === "empty") {
+            empty.style.display = "block";
+            workspace.classList.remove("show");
+            topPill.className = "pill idle";
+            topPill.textContent = "No sessions";
+            return;
+          }
+
+          empty.style.display = "none";
+          workspace.classList.add("show");
+          document.getElementById("app-name").textContent = "Acme Console";
+          document.getElementById("app-meta").textContent =
+            "app.company.com · Playwright · Balanced";
+          document.getElementById("n-pages").textContent = "7";
+          document.getElementById("n-els").textContent = "146";
+          document.getElementById("n-skip").textContent = "9";
+
+          if (name === "exploring") {
+            topPill.className = "pill dot";
+            topPill.textContent = "Exploring";
+            eta.textContent = "12:40";
+            renderEvents(eventsExploring);
+          } else if (name === "paused") {
+            topPill.className = "pill paused dot";
+            topPill.textContent = "Paused";
+            eta.textContent = "—";
+            pauseBtn.classList.add("hidden");
+            resumeBtn.classList.remove("hidden");
+            renderEvents(eventsPaused);
+          } else if (name === "sso") {
+            topPill.className = "pill paused dot";
+            topPill.textContent = "Waiting";
+            eta.textContent = "—";
+            sso.classList.add("show");
+            pauseBtn.disabled = true;
+            document.getElementById("app-meta").textContent =
+              "app.company.com · Manual SSO · Balanced";
+            renderEvents(eventsSso);
+          } else if (name === "done") {
+            topPill.className = "pill";
+            topPill.textContent = "Completed";
+            eta.textContent = "0:00";
+            pauseBtn.classList.add("hidden");
+            document.getElementById("btn-stop").disabled = true;
+            limit.classList.add("show");
+            resumeCtx.classList.remove("hidden");
+            document.getElementById("app-meta").textContent =
+              "app.company.com · Playwright · Balanced · 3m 12s";
+            renderEvents(eventsDone);
+          }
+        }
+
+        document.querySelectorAll(".scene-btn").forEach(function (b) {
+          b.addEventListener("click", function () {
+            setScene(b.dataset.scene);
+          });
+        });
+
+        document.getElementById("btn-theme").addEventListener("click", function () {
+          var root = document.documentElement;
+          root.setAttribute(
+            "data-theme",
+            root.getAttribute("data-theme") === "dark" ? "light" : "dark",
+          );
+        });
+
+        document.getElementById("btn-empty-config").addEventListener("click", function () {
+          document.getElementById("empty-config").classList.toggle("open");
+        });
+        document.getElementById("btn-ws-config").addEventListener("click", function () {
+          document.getElementById("ws-config").classList.toggle("open");
+        });
+        document.getElementById("btn-empty-start").addEventListener("click", function () {
+          setScene("exploring");
+        });
+
+        document.getElementById("empty-profiles").addEventListener("click", function (e) {
+          var p = e.target.closest(".profile");
+          if (!p) return;
+          document.querySelectorAll("#empty-profiles .profile").forEach(function (el) {
+            el.classList.remove("active");
+          });
+          p.classList.add("active");
+        });
+
+        document.getElementById("btn-details").addEventListener("click", function () {
+          var el = document.getElementById("sheet-details");
+          var open = !el.classList.contains("open");
+          closeSheets();
+          if (open) el.classList.add("open");
+        });
+        document.getElementById("btn-docs").addEventListener("click", function () {
+          var el = document.getElementById("sheet-docs");
+          var open = !el.classList.contains("open");
+          closeSheets();
+          if (open) el.classList.add("open");
+        });
+
+        setScene("empty");
+      })();
+    </script>
+  </body>
+</html>

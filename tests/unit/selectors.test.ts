@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSelectorSet,
   generateSelectorCandidates,
+  inferElementType,
   rankSelectors,
 } from "../../src/selectors/index.js";
 import type { ElementSnapshot } from "../../src/browser/types.js";
@@ -35,6 +36,21 @@ describe("selector ranking", () => {
     );
     expect(candidates[0]?.strategy).toBe("testId");
     expect(candidates[0]?.value).toBe("save-user");
+  });
+
+  it("treats input[type=submit] as button not fillable input", () => {
+    expect(
+      inferElementType(
+        snap({
+          tag: "input",
+          inputType: "submit",
+          type: "submit",
+          attributes: { "data-test": "login-button", type: "submit" },
+          accessibleName: "Login",
+          text: "Login",
+        }),
+      ),
+    ).toBe("button");
   });
 
   it("ranks role+name above brittle css", () => {

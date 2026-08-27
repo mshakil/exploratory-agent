@@ -95,6 +95,28 @@ export const ReachedBySchema = z.object({
 });
 export type ReachedBy = z.infer<typeof ReachedBySchema>;
 
+export const SkipReasonCodeSchema = z.enum([
+  "destructive",
+  "cross-origin-frame",
+  "closed-shadow",
+  "overlay-blocked",
+  "new-tab-untracked",
+  "auth-required",
+  "outside-allowlist",
+  "timeout",
+  "detached",
+  "virtualized-unseen",
+]);
+export type SkipReasonCode = z.infer<typeof SkipReasonCodeSchema>;
+
+export const PageCoverageSchema = z.object({
+  main: z.number().default(0),
+  shadow: z.number().default(0),
+  frame: z.number().default(0),
+  skipped: z.number().default(0),
+});
+export type PageCoverage = z.infer<typeof PageCoverageSchema>;
+
 export const PageSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -107,6 +129,8 @@ export const PageSchema = z.object({
   stateFingerprint: z.string(),
   timestamp: z.string(),
   elementIds: z.array(z.string()).default([]),
+  coverage: PageCoverageSchema.optional(),
+  notes: z.array(z.string()).optional(),
 });
 export type Page = z.infer<typeof PageSchema>;
 
@@ -120,6 +144,7 @@ export const ActionSchema = z.object({
   status: ActionStatusSchema,
   value: z.string().optional(),
   reason: z.string().optional(),
+  skipReason: SkipReasonCodeSchema.optional(),
   resultingStateId: z.string().optional(),
   timestamp: z.string().optional(),
 });
@@ -196,6 +221,9 @@ export const ApplicationContextSchema = z.object({
 });
 export type ApplicationContext = z.infer<typeof ApplicationContextSchema>;
 
+export type StabilityProfile = "fast" | "balanced" | "deep";
+export type AuthMode = "none" | "credentials" | "storage-state" | "manual-wait";
+
 export interface ExplorationBoundaries {
   maxPages: number;
   maxActionsPerPage: number;
@@ -204,6 +232,13 @@ export interface ExplorationBoundaries {
   maxDurationMs: number;
   excludedUrls: string[];
   excludedActions: string[];
+  /** SPA settle policy — Balanced is the hardening default. */
+  stabilityProfile: StabilityProfile;
+  exploreOpenShadow: boolean;
+  exploreSameOriginFrames: boolean;
+  domainAllowlist: string[];
+  dismissConsent: boolean;
+  authMode: AuthMode;
 }
 
 export const DEFAULT_BOUNDARIES: ExplorationBoundaries = {
@@ -214,7 +249,70 @@ export const DEFAULT_BOUNDARIES: ExplorationBoundaries = {
   maxDurationMs: 5 * 60_000,
   excludedUrls: [],
   excludedActions: [],
+  stabilityProfile: "balanced",
+  exploreOpenShadow: false,
+  exploreSameOriginFrames: false,
+  domainAllowlist: [],
+  dismissConsent: false,
+  authMode: "none",
 };
+
+/** Apply profile defaults for depth toggles when caller did not override. */
+export function applyStabilityProfile(
+  profile: StabilityProfile,
+  partial: Partial<ExplorationBoundaries> = {},
+): ExplorationBoundaries {
+  const cleaned = Object.fromEntries(
+    Object.entries(partial).filter(([, v]) => v !== undefined),
+  ) as Partial<ExplorationBoundaries>;
+  const base: ExplorationBoundaries = {
+    ...DEFAULT_BOUNDARIES,
+    ...cleaned,
+    stabilityProfile: profile,
+  };
+  if (cleaned.exploreOpenShadow === undefined) {
+    base.exploreOpenShadow = profile === "deep";
+  }
+  if (cleaned.exploreSameOriginFrames === undefined) {
+    base.exploreSameOriginFrames = profile === "deep";
+  }
+  if (cleaned.dismissConsent === undefined) {
+    base.dismissConsent = profile === "balanced" || profile === "deep";
+  }
+  return base;
+}
+
+export interface StabilityTiming {
+  /** Post-load quiet delay before interacting */
+  settleMs: number;
+  /** Wait for DOM mutation quiet window */
+  mutationQuietMs: number;
+  /** Attempt capped networkidle (Deep) */
+  networkIdle: boolean;
+  networkIdleCapMs: number;
+}
+
+export function stabilityTimingFor(profile: StabilityProfile): StabilityTiming {
+  switch (profile) {
+    case "fast":
+      return { settleMs: 100, mutationQuietMs: 0, networkIdle: false, networkIdleCapMs: 0 };
+    case "deep":
+      return {
+        settleMs: 600,
+        mutationQuietMs: 500,
+        networkIdle: true,
+        networkIdleCapMs: 3_000,
+      };
+    case "balanced":
+    default:
+      return {
+        settleMs: 350,
+        mutationQuietMs: 300,
+        networkIdle: false,
+        networkIdleCapMs: 0,
+      };
+  }
+}
 
 export type ExploreMode = "initial" | "reexplore" | "continue";
 

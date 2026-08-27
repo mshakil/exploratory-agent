@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
@@ -30,324 +30,155 @@
   </head>
   <body>
     <div id="app">
-      <header class="topbar">
+      <header class="top">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true">
+          <span class="mark" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>
           </span>
-          <div class="brand-text">
+          <div>
             <h1>Application Explorer</h1>
             <p>Explore. Understand. Automate.</p>
           </div>
         </div>
-        <div class="topbar-actions">
-          <button type="button" class="btn ghost compact" id="btn-help" title="Help">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></svg>
-            Help
-          </button>
-          <button type="button" class="icon-btn top-icon" id="btn-theme" title="Toggle theme" aria-label="Toggle dark and light theme">
+        <div class="top-actions">
+          <span class="user-chip hidden" id="user-chip">
+            <span id="user-name"></span>
+            <button type="button" class="linkish compact" id="btn-logout">Log out</button>
+          </span>
+          <button type="button" class="ghost compact icon-btn" id="btn-theme" title="Toggle theme" aria-label="Toggle theme">
             <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-            <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 14.5A8.5 8.5 0 0110.5 3 7 7 0 1021 14.5z"/></svg>
+            <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 14.5A8.5 8.5 0 0 1 9.5 3 7 7 0 1 0 21 14.5z"/></svg>
           </button>
-          <span class="avatar" title="Session">AE</span>
+          <span class="pill idle" id="top-pill">No sessions</span>
         </div>
       </header>
 
-      <main class="workspace" id="workspace">
-        <!-- LEFT -->
-        <aside class="col left-col">
-          <section class="card start-card">
-            <h2 class="card-title">
-              <svg class="title-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8l6 4-6 4V8z"/></svg>
-              Start New Exploration
-            </h2>
-            <form id="start-form" autocomplete="off">
-              <label class="field">
-                <span>Application URL <em>*</em></span>
-                <div class="input-wrap">
-                  <svg class="input-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
-                  <input id="input-url" name="url" type="url" required placeholder="https://example-app.com" spellcheck="false" />
-                </div>
-              </label>
-              <div class="field-row">
-                <label class="field">
-                  <span>Username <small>(Optional)</small></span>
-                  <div class="input-wrap">
-                    <svg class="input-icon" viewBox="0 0 24 24"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="8" r="4"/></svg>
-                    <input id="input-username" name="username" type="text" autocomplete="username" placeholder="admin" />
-                  </div>
-                </label>
-                <label class="field">
-                  <span>Password <small>(Optional)</small></span>
-                  <div class="input-wrap">
-                    <svg class="input-icon" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
-                    <input id="input-password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" />
-                    <button type="button" class="input-affix" id="btn-toggle-password" title="Show password" aria-label="Show password">
-                      <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
-                    </button>
-                  </div>
-                </label>
-              </div>
-              <label class="field">
-                <span>Framework <small>(Optional)</small></span>
-                <div class="fw-picker" id="fw-picker">
-                  <input type="hidden" id="input-framework" name="framework" value="independent" />
-                  <button type="button" class="fw-trigger" id="fw-trigger" aria-haspopup="listbox" aria-expanded="false">
-                    <span class="fw-icon" id="fw-trigger-icon" aria-hidden="true"></span>
-                    <span class="fw-label" id="fw-trigger-label">Framework Independent</span>
-                    <svg class="fw-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-                  </button>
-                  <ul class="fw-menu hidden" id="fw-menu" role="listbox" aria-label="Framework"></ul>
-                </div>
-              </label>
-              <details class="advanced">
-                <summary>Advanced Options</summary>
-                <div class="advanced-body">
-                  <label class="field">
-                    <span>Max pages</span>
-                    <input id="input-max-pages" type="number" min="1" max="200" value="50" />
-                  </label>
-                  <label class="field">
-                    <span>Max duration (ms)</span>
-                    <input id="input-max-duration" type="number" min="10000" step="1000" value="300000" />
-                  </label>
-                </div>
-              </details>
-              <p class="form-error hidden" id="form-error" role="alert"></p>
-              <button type="submit" class="btn primary block" id="btn-start">
-                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                Start Exploring
-              </button>
-            </form>
-          </section>
+      <!-- Auth gate -->
+      <section class="empty auth-view" id="view-auth">
+        <h2 id="auth-title">Sign in</h2>
+        <p id="auth-subtitle">Each explorer account keeps its own sessions. Multiple users can explore in parallel.</p>
+        <form class="empty-form" id="auth-form" autocomplete="on">
+          <div class="cfg-field">
+            <label for="auth-username">Username</label>
+            <input class="field" id="auth-username" type="text" required minlength="2" autocomplete="username" spellcheck="false" />
+          </div>
+          <div class="cfg-field">
+            <label for="auth-password">Password</label>
+            <input class="field" id="auth-password" type="password" required minlength="8" autocomplete="current-password" />
+          </div>
+          <div class="actions">
+            <button type="submit" class="primary" id="btn-auth-submit">Sign in</button>
+            <button type="button" class="linkish" id="btn-auth-toggle">Need an account? Register</button>
+            <button type="button" class="ghost block hidden" id="btn-auth-azure" disabled>Sign in with Microsoft</button>
+          </div>
+          <p class="form-error hidden" id="auth-error" role="alert"></p>
+        </form>
+      </section>
 
-          <section class="card sessions-card">
-            <h2 class="section-label">Exploration Sessions</h2>
-            <ul class="session-list" id="session-list"></ul>
-            <p class="empty-hint hidden" id="sessions-empty">No sessions yet. Start an exploration above.</p>
-            <button type="button" class="link-btn" id="btn-view-all">View All Sessions</button>
-          </section>
+      <!-- Empty state (C) -->
+      <section class="empty hidden" id="view-empty">
+        <h2>Explore an application</h2>
+        <p>Enter a URL to discover pages, flows, and selectors. Optional login and depth settings stay out of the way.</p>
+        <form class="empty-form" id="empty-form" autocomplete="off">
+          <input class="url" id="empty-url" type="url" required placeholder="https://example-app.com" spellcheck="false" aria-label="Application URL" />
+          <div class="actions">
+            <button type="submit" class="primary" id="btn-empty-start">Start exploring</button>
+            <button type="button" class="linkish" id="btn-empty-config">Optional settings</button>
+          </div>
+          <p class="form-error hidden" id="empty-error" role="alert"></p>
+          <div class="config-panel" id="empty-config" data-config="empty"></div>
+        </form>
+      </section>
+
+      <!-- Workspace (A) -->
+      <main class="workspace" id="view-workspace">
+        <aside class="left">
+          <div>
+            <h2>New exploration</h2>
+            <form id="ws-form" autocomplete="off">
+              <input class="url" id="ws-url" type="url" required placeholder="https://example-app.com" spellcheck="false" aria-label="URL" />
+              <div class="start-stack">
+                <button type="submit" class="primary" id="btn-ws-start">Start exploring</button>
+                <button type="button" class="linkish" id="btn-ws-config">Configure…</button>
+              </div>
+              <p class="form-error hidden" id="ws-error" role="alert"></p>
+              <div class="drawer" id="ws-config" data-config="workspace"></div>
+            </form>
+          </div>
+          <div>
+            <div class="section-label">Sessions</div>
+            <div id="session-list"></div>
+            <p class="muted empty-sessions hidden" id="sessions-empty">No sessions yet.</p>
+          </div>
         </aside>
 
-        <!-- CENTER -->
-        <section class="col canvas-col">
-          <div class="canvas-shell">
-            <div class="session-header" id="session-header">
-              <div class="session-header-main">
-                <div class="session-title-row">
-                  <h2 id="canvas-app-name">Select a session</h2>
-                  <span class="status-pill" id="canvas-status-pill">—</span>
-                  <span class="fw-pill hidden" id="canvas-fw-pill"></span>
-                </div>
-                <p class="muted mono" id="canvas-app-url">Start a new exploration or pick a session</p>
-              </div>
-              <div class="session-header-actions">
-                <button type="button" class="btn ghost compact hidden" id="btn-pause" title="Pause">
-                  <svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
-                  Pause
-                </button>
-                <button type="button" class="btn danger compact hidden" id="btn-stop" title="Stop">
-                  <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-                  Stop
-                </button>
-                <div class="menu-wrap">
-                  <button type="button" class="icon-btn" id="btn-session-menu" aria-haspopup="true" aria-expanded="false" title="Session actions">
-                    <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
-                  </button>
-                  <div class="menu hidden" id="session-menu" role="menu">
-                    <button type="button" role="menuitem" id="btn-download-all" disabled>Download all</button>
-                    <button type="button" role="menuitem" id="btn-remove-context" disabled>Remove context</button>
-                    <button type="button" role="menuitem" class="danger" id="btn-delete-session" disabled>Delete session</button>
-                  </div>
-                </div>
-              </div>
+        <section class="main">
+          <div class="main-head">
+            <div>
+              <h2 id="app-name">Select a session</h2>
+              <div class="muted mono" id="app-meta">Start or pick a session</div>
             </div>
-
-            <div class="center-tabs" role="tablist">
-              <button type="button" class="ctab active" data-ctab="live" id="ctab-live">Live Exploration</button>
-              <button type="button" class="ctab" data-ctab="changes" id="ctab-changes">Change Summary</button>
-              <button type="button" class="ctab" data-ctab="stats" id="ctab-stats">Statistics</button>
-              <button type="button" class="ctab" data-ctab="graph" id="ctab-graph">Graph</button>
-              <button type="button" class="ctab" data-ctab="settings" id="ctab-settings">Settings</button>
+            <div class="head-actions">
+              <button type="button" class="ghost hidden" id="btn-pause">Pause</button>
+              <button type="button" class="ghost hidden" id="btn-resume-run">Resume</button>
+              <button type="button" class="ghost hidden" id="btn-stop">Stop</button>
             </div>
+          </div>
 
-            <div class="ctab-panel" id="panel-live">
-              <div class="canvas-head">
-                <div class="canvas-head-left">
-                  <h3>Exploration Canvas</h3>
-                  <span class="live-badge hidden" id="live-badge">
-                    <span class="pulse-dot"></span> LIVE
-                  </span>
-                </div>
-                <div class="canvas-head-right">
-                  <label class="toggle">
-                    <input type="checkbox" id="toggle-autoscroll" checked />
-                    <span class="toggle-ui"></span>
-                    <span>Auto-scroll</span>
-                  </label>
-                  <button type="button" class="btn ghost compact" id="btn-clear-canvas" title="Clear canvas view">
-                    <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              <div class="canvas-scroll" id="canvas-scroll">
-                <ol class="event-timeline" id="event-timeline"></ol>
-                <div class="canvas-empty" id="canvas-empty">
-                  <div class="empty-illu" aria-hidden="true"></div>
-                  <h3>Ready to explore</h3>
-                  <p>Enter an application URL and click Start Exploring to watch discovery happen live.</p>
-                </div>
-                <div class="failed-banner hidden" id="failed-banner">
-                  <h3>Exploration Failed</h3>
-                  <p id="failed-reason"></p>
-                  <button type="button" class="btn primary compact" id="btn-retry">Retry</button>
-                </div>
-              </div>
+          <div class="sso" id="sso-banner">
+            <strong>Waiting for manual login</strong>
+            Complete SSO in the headed browser, then continue.
+            <div class="row">
+              <button type="button" class="primary compact" id="btn-sso-continue" disabled title="Available in auth hardening">Continue exploration</button>
+              <button type="button" class="ghost compact" id="btn-sso-stop">Stop</button>
             </div>
+          </div>
 
-            <div class="ctab-panel hidden" id="panel-changes">
-              <div class="change-summary-panel" id="change-summary-panel">
-                <p class="empty-hint" id="changes-empty">Change summary appears after a resume / re-exploration.</p>
-                <div class="change-grid hidden" id="change-grid"></div>
-              </div>
+          <div class="limit" id="limit-banner">
+            <strong>Exploration limitations</strong> —
+            <span id="limit-text">actions were skipped. Notes are included in CONTEXT.md.</span>
+          </div>
+
+          <div class="failed-banner hidden" id="failed-banner">
+            <strong>Exploration failed</strong>
+            <p id="failed-reason"></p>
+            <button type="button" class="primary compact" id="btn-retry">Retry</button>
+          </div>
+
+          <div class="stream" id="stream" aria-live="polite">
+            <div class="stream-empty" id="stream-empty">Live events will appear here.</div>
+          </div>
+
+          <div class="side-sheet" id="sheet-details">
+            <h3>Details</h3>
+            <dl class="kv" id="details-kv"></dl>
+          </div>
+
+          <div class="side-sheet" id="sheet-docs">
+            <h3>Documents</h3>
+            <div id="doc-list"></div>
+            <p class="muted" id="docs-empty">Documents appear when exploration completes.</p>
+            <div class="docs-zip">
+              <button type="button" class="primary block" id="btn-download-zip" disabled>Download all (.zip)</button>
+              <button type="button" class="ghost block" id="btn-remove-context" disabled>Remove context</button>
             </div>
-
-            <div class="ctab-panel hidden" id="panel-stats">
-              <div class="overview-grid" id="overview-grid">
-                <div class="ov"><span class="ov-n" id="ov-pages">0</span><span class="ov-l">Pages</span></div>
-                <div class="ov"><span class="ov-n" id="ov-elements">0</span><span class="ov-l">Elements</span></div>
-                <div class="ov"><span class="ov-n" id="ov-actions">0</span><span class="ov-l">Actions</span></div>
-                <div class="ov"><span class="ov-n" id="ov-flows">0</span><span class="ov-l">Flows</span></div>
-              </div>
-              <dl class="overview-dl">
-                <div><dt>Status</dt><dd id="ov-status">—</dd></div>
-                <div><dt>Framework</dt><dd id="ov-framework">—</dd></div>
-                <div><dt>Started</dt><dd id="ov-started">—</dd></div>
-                <div><dt>Completed</dt><dd id="ov-completed">—</dd></div>
-                <div><dt>Session ID</dt><dd class="mono" id="ov-id">—</dd></div>
-              </dl>
+            <div class="docs-danger">
+              <button type="button" class="linkish danger" id="btn-delete-session" disabled>Delete session</button>
             </div>
+          </div>
 
-            <div class="ctab-panel hidden" id="panel-graph">
-              <div class="graph-panel">
-                <div class="graph-toolbar">
-                  <div class="graph-meta">
-                    <span id="graph-node-count">0 pages</span>
-                    <span class="sep">·</span>
-                    <span id="graph-edge-count">0 transitions</span>
-                  </div>
-                  <div class="graph-toolbar-actions">
-                    <div class="graph-zoom" role="group" aria-label="Graph zoom">
-                      <button type="button" class="icon-btn" id="btn-graph-zoom-out" title="Zoom out" aria-label="Zoom out">
-                        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
-                      </button>
-                      <span class="graph-zoom-pct" id="graph-zoom-pct">100%</span>
-                      <button type="button" class="icon-btn" id="btn-graph-zoom-in" title="Zoom in" aria-label="Zoom in">
-                        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-                      </button>
-                      <button type="button" class="btn ghost compact" id="btn-graph-zoom-reset" title="Reset zoom">Reset</button>
-                    </div>
-                    <button type="button" class="btn ghost compact" id="btn-graph-refresh" title="Refresh graph">
-                      <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0114.9-4M20 12a8 8 0 01-14.9 4M16 4v4h4M8 20v-4H4"/></svg>
-                      Refresh
-                    </button>
-                  </div>
-                </div>
-                <p class="graph-hint" id="graph-hint">Pages flow left → right. Click a page for details.</p>
-                <div class="graph-viewport" id="graph-viewport">
-                  <p class="empty-hint" id="graph-empty">Select a session to view its application graph.</p>
-                  <svg id="graph-svg" class="graph-svg hidden" xmlns="http://www.w3.org/2000/svg"></svg>
-                </div>
-                <div class="graph-detail hidden" id="graph-detail">
-                  <div class="graph-detail-main">
-                    <strong id="graph-detail-title">—</strong>
-                    <span class="status-pill" id="graph-detail-status">—</span>
-                  </div>
-                  <p class="mono muted" id="graph-detail-url">—</p>
-                  <p class="muted" id="graph-detail-meta">—</p>
-                </div>
-                <div class="graph-legend">
-                  <span><i class="gl completed"></i> Completed</span>
-                  <span><i class="gl exploring"></i> Exploring</span>
-                  <span><i class="gl discovered"></i> Discovered</span>
-                  <span><i class="gl blocked"></i> Blocked</span>
-                  <span class="graph-legend-note">Arrow label = action that opened the next page</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="ctab-panel hidden" id="panel-settings">
-              <p class="muted">Session settings are captured at start. Framework and credentials are not editable mid-run.</p>
-              <dl class="overview-dl" id="settings-dl">
-                <div><dt>URL</dt><dd class="mono" id="set-url">—</dd></div>
-                <div><dt>Username</dt><dd id="set-user">—</dd></div>
-                <div><dt>Framework</dt><dd id="set-fw">—</dd></div>
-              </dl>
-            </div>
-
-            <div class="canvas-foot" id="progress-block">
-              <div class="progress-top">
-                <span id="progress-label">Waiting to start</span>
-                <span class="progress-pct" id="progress-pct"></span>
-              </div>
-              <div class="progress-track" id="progress-track" hidden>
-                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-              </div>
-              <div class="stat-row">
-                <div class="stat"><span class="stat-n" id="stat-pages">0</span><span class="stat-l">Pages</span></div>
-                <div class="stat"><span class="stat-n" id="stat-elements">0</span><span class="stat-l">Elements</span></div>
-                <div class="stat"><span class="stat-n" id="stat-actions">0</span><span class="stat-l">Actions</span></div>
-                <div class="stat"><span class="stat-n" id="stat-flows">0</span><span class="stat-l">Flows</span></div>
-                <div class="stat"><span class="stat-n" id="stat-eta">—</span><span class="stat-l">Est. Remaining</span></div>
-              </div>
+          <div class="foot">
+            <div class="stat"><b id="n-pages">0</b><span>Pages</span></div>
+            <div class="stat"><b id="n-els">0</b><span>Elements</span></div>
+            <div class="stat"><b id="n-skip">0</b><span>Skipped</span></div>
+            <div class="stat"><b id="n-eta">—</b><span>Remaining</span></div>
+            <div class="foot-links">
+              <button type="button" class="linkish" id="btn-details">Details</button>
+              <button type="button" class="linkish" id="btn-docs">Docs</button>
+              <button type="button" class="primary compact hidden" id="btn-resume-ctx">Resume exploration</button>
             </div>
           </div>
         </section>
-
-        <!-- RIGHT -->
-        <aside class="col right-col">
-          <section class="card context-session-card" id="context-session-card">
-            <h2 class="card-title">Application Context</h2>
-            <div class="context-session-top">
-              <div>
-                <div class="context-name-row">
-                  <strong id="context-name">No session selected</strong>
-                  <span class="status-pill" id="context-status-pill">—</span>
-                </div>
-                <p class="muted mono" id="context-url">Select or start a session</p>
-                <p class="muted" id="context-meta">—</p>
-              </div>
-            </div>
-            <div class="context-fw-row">
-              <span class="fw-pill" id="context-fw-pill">Framework Independent</span>
-            </div>
-            <button type="button" class="btn primary block hidden" id="btn-resume">
-              <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0114.9-4M20 12a8 8 0 01-14.9 4M16 4v4h4M8 20v-4H4"/></svg>
-              Resume Exploration
-            </button>
-          </section>
-
-          <section class="card docs-card">
-            <div class="card-title-row">
-              <h2 class="section-label">Documents</h2>
-              <button type="button" class="btn ghost compact" id="btn-download-zip" disabled title="Download all">
-                <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
-              </button>
-            </div>
-            <ul class="doc-list" id="doc-list"></ul>
-            <p class="empty-hint" id="docs-empty">Documents appear when exploration completes.</p>
-          </section>
-
-          <section class="card changes-card" id="right-changes-card">
-            <h2 class="section-label">Change Summary (Latest)</h2>
-            <div class="change-mini" id="change-mini">
-              <p class="empty-hint" id="right-changes-empty">No re-exploration changes yet.</p>
-              <div class="change-mini-grid hidden" id="change-mini-grid"></div>
-            </div>
-          </section>
-        </aside>
       </main>
 
       <div class="modal-overlay hidden" id="doc-modal" role="dialog" aria-modal="true" aria-labelledby="doc-modal-title">
@@ -357,32 +188,68 @@
           </div>
           <pre class="modal-body" id="doc-content"></pre>
           <div class="modal-foot">
-            <button type="button" class="btn ghost compact" id="doc-copy">Copy</button>
-            <button type="button" class="btn primary compact" id="doc-close">Close</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-overlay hidden" id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
-        <div class="modal-card modal-card-sm">
-          <div class="modal-head">
-            <h2 id="help-modal-title">How to use Application Explorer</h2>
-          </div>
-          <div class="modal-body help-body">
-            <ol>
-              <li>Enter an application URL, optional credentials, and framework, then click <strong>Start Exploring</strong>.</li>
-              <li>Watch live discovery activity in the Exploration Canvas.</li>
-              <li>When finished, open Documents and download <code>CONTEXT.md</code> (or the full zip) for coding agents.</li>
-              <li>Use <strong>Resume Exploration</strong> on a completed session to re-explore and detect changes.</li>
-            </ol>
-            <p class="muted">Passwords are never persisted. Framework selection only affects generated documentation.</p>
-          </div>
-          <div class="modal-foot">
-            <button type="button" class="btn primary compact" id="help-close">Close</button>
+            <button type="button" class="ghost compact" id="doc-copy">Copy</button>
+            <button type="button" class="primary compact" id="doc-close">Close</button>
           </div>
         </div>
       </div>
     </div>
+
+    <template id="tpl-config">
+      <h3 class="cfg-heading">Settings</h3>
+      <div class="cfg-grid">
+        <div class="cfg-field">
+          <label>Username</label>
+          <input class="field cfg-username" type="text" autocomplete="username" placeholder="admin" />
+        </div>
+        <div class="cfg-field">
+          <label>Password</label>
+          <input class="field cfg-password" type="password" autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <div class="cfg-field full">
+          <label>Framework</label>
+          <select class="field cfg-framework">
+            <option value="independent">Framework Independent</option>
+            <option value="playwright">Playwright</option>
+            <option value="selenium-java">Selenium Java</option>
+            <option value="selenium-javascript" disabled>Selenium JavaScript (soon)</option>
+            <option value="cypress" disabled>Cypress (soon)</option>
+            <option value="webdriverio" disabled>WebdriverIO (soon)</option>
+          </select>
+        </div>
+        <div class="cfg-field full">
+          <label>Auth mode</label>
+          <select class="field cfg-auth-mode">
+            <option value="none">None</option>
+            <option value="credentials">Username / password</option>
+            <option value="storage-state">Playwright storage state</option>
+            <option value="manual-wait">Manual SSO (headed)</option>
+          </select>
+        </div>
+        <div class="cfg-field full cfg-storage-wrap hidden">
+          <label>Storage state path</label>
+          <input class="field cfg-storage-state" type="text" placeholder="path/to/storageState.json" />
+        </div>
+        <div class="cfg-field full">
+          <label>Exploration profile</label>
+          <div class="profiles" data-profiles>
+            <button type="button" class="profile" data-p="fast">Fast</button>
+            <button type="button" class="profile active" data-p="balanced">Balanced</button>
+            <button type="button" class="profile" data-p="deep">Deep</button>
+          </div>
+        </div>
+        <div class="cfg-field full">
+          <label>Domain allowlist</label>
+          <textarea class="field cfg-allowlist" placeholder="One host per line (default: start origin)"></textarea>
+        </div>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" class="cfg-consent" /> Dismiss cookie / consent banners</label>
+        <label><input type="checkbox" class="cfg-shadow" /> Explore open Shadow DOM</label>
+        <label><input type="checkbox" class="cfg-frames" /> Explore same-origin iframes</label>
+      </div>
+    </template>
+
     <script src="/app.js" type="module"></script>
   </body>
 </html>

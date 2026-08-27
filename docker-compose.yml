@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent-explorer-pg
+    environment:
+      POSTGRES_USER: ae
+      POSTGRES_PASSWORD: ae
+      POSTGRES_DB: agent_explorer
+    ports:
+      - "5432:5432"
+    volumes:
+      - ae_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ae -d agent_explorer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ae_pg_data:

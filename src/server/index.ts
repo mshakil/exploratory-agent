@@ -185,6 +185,41 @@ async function handleRequest(
     return;
   }
 
+  if (pathname === "/api/ai/models" && method === "POST") {
+    const user = await auth.requireUser(req);
+    if (!user) {
+      json(req, res, 401, { error: "Not authenticated" });
+      return;
+    }
+    const apiKey = String(req.headers["x-api-key"] || "").trim();
+    const body = await readJsonBody<{
+      provider?: string;
+      azureEndpoint?: string;
+      apiKey?: string;
+    }>(req);
+    const key = apiKey || String(body.apiKey || "").trim();
+    if (!body.provider) {
+      json(req, res, 400, { error: "provider is required" });
+      return;
+    }
+    if (!key) {
+      json(req, res, 400, { error: "API key required (x-api-key header)" });
+      return;
+    }
+    try {
+      const { listProviderModels } = await import("../ai/index.js");
+      const models = await listProviderModels({
+        provider: body.provider as "openai" | "anthropic" | "azure-openai",
+        apiKey: key,
+        azureEndpoint: body.azureEndpoint,
+      });
+      json(req, res, 200, { models });
+    } catch (err) {
+      json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
   if (pathname === "/api/ai/generate-docs" && method === "POST") {
     const user = await auth.requireUser(req);
     if (!user) {
@@ -200,8 +235,8 @@ async function handleRequest(
       azureEndpoint?: string;
       azureDeployment?: string;
       apiKey?: string;
+      stream?: boolean;
     }>(req);
-    // Prefer header; allow body only as fallback (never log either)
     const apiKey = apiKeyHeader || String(body.apiKey || "").trim();
     if (!body.sessionId) {
       json(req, res, 400, { error: "sessionId is required" });
@@ -219,10 +254,16 @@ async function handleRequest(
     const owned = await requireOwnedSession(req, res, manager, auth, user, body.sessionId);
     if (!owned) return;
 
+    const stream = body.stream !== false;
+    const writeEvent = stream ? ndjson(req, res) : null;
+
     try {
       const { ApplicationContextSchema } = await import("../models/index.js");
       const { generateAiDocumentation } = await import("../ai/index.js");
-      const contextPath = path.join(owned.contextPath, "application.json");
+      const store = manager.getStore();
+      const systemDir = store.contextDir(owned.id);
+      const aiDir = store.aiContextDir(owned.id);
+      const contextPath = path.join(systemDir, "application.json");
       const raw = await readFile(contextPath, "utf8");
       const context = ApplicationContextSchema.parse(JSON.parse(raw));
       const modules = (body.modules || ["docs"]).filter(
@@ -231,7 +272,8 @@ async function handleRequest(
       );
       const result = await generateAiDocumentation({
         context,
-        outputDir: owned.contextPath,
+        systemDir,
+        aiDir,
         meta: {
           framework: owned.framework,
           applicationName: owned.applicationName,
@@ -248,31 +290,71 @@ async function handleRequest(
           azureEndpoint: body.azureEndpoint,
           azureDeployment: body.azureDeployment,
         },
+        onProgress: writeEvent
+          ? (progress) => writeEvent({ type: "progress", ...progress })
+          : undefined,
       });
 
       if (result.error && result.fallbackToSystem) {
-        json(req, res, 502, {
+        const payload = {
+          type: "error",
           error: result.error,
           fallbackToSystem: true,
           usage: result.usage,
-        });
+        };
+        if (writeEvent) {
+          writeEvent(payload);
+          res.end();
+        } else {
+          json(req, res, 502, {
+            error: result.error,
+            fallbackToSystem: true,
+            usage: result.usage,
+          });
+        }
         return;
       }
 
+      const historyEntry = {
+        at: new Date().toISOString(),
+        module: "docs",
+        provider: result.usage.provider,
+        model: result.usage.model,
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
+        totalTokens: result.usage.totalTokens,
+        estimatedCostUsd: result.usage.estimatedCostUsd,
+      };
+      const priorHistory = owned.aiUsageHistory ?? [];
       const session = await manager.updateSession(owned.id, {
         docGenerationMode: "ai",
         aiModules: modules,
         aiUsage: result.usage,
+        aiUsageHistory: [...priorHistory, historyEntry],
       });
 
-      json(req, res, 200, {
+      const complete = {
+        type: "complete",
         ok: true,
         files: result.files.map((f) => path.basename(f)),
         usage: result.usage,
+        manifest: result.manifest,
         session,
-      });
+      };
+      if (writeEvent) {
+        writeEvent(complete);
+        res.end();
+      } else {
+        json(req, res, 200, complete);
+      }
     } catch (err) {
-      json(req, res, 400, { error: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      if (writeEvent) {
+        writeEvent({ type: "error", error: message });
+        res.end();
+      } else {
+        json(req, res, 400, { error: message });
+      }
     }
     return;
   }
@@ -381,17 +463,19 @@ async function handleRequest(
       }
 
       if (rest === "/documents" && method === "GET") {
-        const documents = await manager.listDocuments(sessionId);
-        json(req, res, 200, { documents });
+        const variant = parseDocVariant(url.searchParams.get("variant"));
+        const listing = await manager.listDocuments(sessionId, variant);
+        json(req, res, 200, listing);
         return;
       }
 
       if (rest === "/documents/download-all" && method === "GET") {
-        const documents = await manager.listDocuments(sessionId);
+        const variant = parseDocVariant(url.searchParams.get("variant"));
+        const listing = await manager.listDocuments(sessionId, variant);
         const entries = [];
-        for (const doc of documents) {
+        for (const doc of listing.documents) {
           if (!doc.available) continue;
-          const content = await manager.getStore().readDocument(sessionId, doc.name);
+          const content = await manager.getStore().readDocument(sessionId, doc.name, doc.source);
           if (content !== null) entries.push({ name: doc.name, content });
         }
         if (entries.length === 0) {
@@ -399,7 +483,8 @@ async function handleRequest(
           return;
         }
         const zip = createZipBuffer(entries);
-        const zipName = `${sanitizeFilename(owned.applicationName)}-context.zip`;
+        const suffix = variant === "ai" ? "-ai-context" : "-context";
+        const zipName = `${sanitizeFilename(owned.applicationName)}${suffix}.zip`;
         cors(req, res);
         res.writeHead(200, {
           "Content-Type": "application/zip",
@@ -417,7 +502,11 @@ async function handleRequest(
           json(req, res, 400, { error: "Invalid document name" });
           return;
         }
-        const content = await manager.getStore().readDocument(sessionId, name);
+        const variant = parseDocVariant(url.searchParams.get("variant"));
+        const listing = await manager.listDocuments(sessionId, variant);
+        const docMeta = listing.documents.find((d) => d.name === name);
+        const readVariant = docMeta?.source ?? variant;
+        const content = await manager.getStore().readDocument(sessionId, name, readVariant);
         if (content === null) {
           json(req, res, 404, { error: "Document not found" });
           return;
@@ -690,7 +779,7 @@ function cors(req: IncomingMessage, res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type",
+    "Content-Type, x-api-key",
   );
 }
 
@@ -718,6 +807,23 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
   const text = Buffer.concat(chunks).toString("utf8");
   if (!text.trim()) return {} as T;
   return JSON.parse(text) as T;
+}
+
+function ndjson(
+  req: IncomingMessage,
+  res: ServerResponse,
+): (event: unknown) => void {
+  cors(req, res);
+  if (!res.headersSent) {
+    res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8" });
+  }
+  return (event: unknown) => {
+    res.write(`${JSON.stringify(event)}\n`);
+  };
+}
+
+function parseDocVariant(value: string | null): "system" | "ai" {
+  return value === "ai" ? "ai" : "system";
 }
 
 function sanitizeFilename(name: string): string {

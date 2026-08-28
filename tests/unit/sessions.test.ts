@@ -126,6 +126,30 @@ describeDb("SessionStore (postgres)", () => {
     expect(JSON.stringify(loaded)).not.toMatch(/sk-/i);
   });
 
+  it("persists AI usage history entries", async () => {
+    const id = createSessionId();
+    await store.ensureSession(id);
+    await store.saveSession(
+      baseSession(id, {
+        aiUsageHistory: [
+          {
+            at: "2026-08-28T00:00:00.000Z",
+            module: "docs",
+            provider: "openai",
+            model: "gpt-4o-mini",
+            promptTokens: 10,
+            completionTokens: 20,
+            totalTokens: 30,
+            estimatedCostUsd: 0.001,
+          },
+        ],
+      }),
+    );
+    const loaded = await store.loadSession(id);
+    expect(loaded?.aiUsageHistory).toHaveLength(1);
+    expect(loaded?.aiUsageHistory?.[0]?.model).toBe("gpt-4o-mini");
+  });
+
   it("keeps two sessions isolated on disk and in db", async () => {
     const a = createSessionId();
     const b = createSessionId();

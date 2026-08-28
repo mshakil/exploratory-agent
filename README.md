@@ -86,7 +86,9 @@ npx agent-explorer explore \
 - Enter URL, optional target-app credentials, stability profile, and framework (Independent, Playwright, Selenium Java)
 - Watch live discovery (pages, elements, actions, flows, skip reasons, ETA)
 - Pause / resume / stop; delete session or remove generated context
-- Download `CONTEXT.md`, individual docs, or a full zip
+- Download `CONTEXT.md`, individual docs, or a full zip (system or AI source)
+- **Generate AI docs** — polish system markdown with BYOK; progress bar + streaming status
+- Switch **Docs source** (System vs AI) and compare token usage across providers/models
 - Resume a completed session to re-explore and review change reports
 - Dark / light theme (icon toggle; persisted in the browser)
 
@@ -150,13 +152,14 @@ Hybrid storage — metadata in Postgres, artifacts on disk:
 data/sessions/<session-id>/
 ├── memory/                 # Crawl snapshot (JSON)
 └── application-context/
-    ├── CONTEXT.md          # Entry point for coding agents
+    ├── CONTEXT.md          # Entry point for coding agents (system-generated)
     ├── AGENTS.md
     ├── application.md
     ├── pages.md
     ├── flows.md
     ├── selectors.md
-    ├── application.json
+    ├── application.json    # Always system-generated (never overwritten by AI)
+    ├── ai/                 # Optional BYOK-polished markdown + manifest.json
     ├── framework/          # Optional framework-specific docs
     └── changes/            # Resume change reports
 ```
@@ -171,7 +174,18 @@ Hand `CONTEXT.md` (or the folder) to a coding agent. Metadata (users, sessions, 
 
 Documentation defaults to **System** (deterministic templates from `application.json`).
 
-Optionally choose **AI** output and bring your own key (OpenAI, Anthropic, or Azure OpenAI). The **docs** module rewrites markdown files; `application.json` stays system-generated. API keys are sent only for generation requests and are **never** stored in Postgres. After generation, the UI shows prompt/completion/total tokens and an estimated USD cost (estimate only).
+Use **Generate AI docs** in the UI (or set output mode when starting a session) to polish markdown with your own key. Supported providers: **OpenAI**, **Anthropic**, and **Azure OpenAI**. The model dropdown is populated at runtime from each provider’s API — not a hardcoded list.
+
+| Behavior | Detail |
+|---|---|
+| Storage | System files stay in `application-context/`; AI-polished markdown goes to `application-context/ai/` |
+| `application.json` | Always system-generated; never overwritten by AI |
+| Regenerate | Running again with a different model **replaces** prior AI files only |
+| API keys | Sent only for generation requests; **never** stored in Postgres |
+| Progress | Streaming updates + in-button progress bar during generation |
+| Usage history | Token counts and estimated USD cost are saved per session for comparing providers/models |
+
+After `npm pull` / schema changes, run `npm run db:migrate` (migration `0003` adds `ai_usage_history`).
 
 Enrich / explore-hints modules are scaffolded for later.
 

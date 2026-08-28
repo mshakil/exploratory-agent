@@ -35,27 +35,13 @@ export interface AiChatResult {
 export interface AiProviderInfo {
   id: AiProviderId;
   label: string;
-  models: string[];
   needsAzureEndpoint?: boolean;
 }
 
 export const AI_PROVIDERS: AiProviderInfo[] = [
-  {
-    id: "openai",
-    label: "OpenAI",
-    models: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"],
-  },
-  {
-    id: "anthropic",
-    label: "Anthropic",
-    models: ["claude-3-5-haiku-latest", "claude-3-5-sonnet-latest", "claude-sonnet-4-0"],
-  },
-  {
-    id: "azure-openai",
-    label: "Azure OpenAI",
-    models: ["gpt-4o-mini", "gpt-4o"],
-    needsAzureEndpoint: true,
-  },
+  { id: "openai", label: "OpenAI" },
+  { id: "anthropic", label: "Anthropic" },
+  { id: "azure-openai", label: "Azure OpenAI", needsAzureEndpoint: true },
 ];
 
 export const AI_RATE_TABLE: Record<

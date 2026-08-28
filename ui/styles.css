@@ -194,8 +194,27 @@ textarea.field {
 .cfg-hint { margin: 6px 0 0; }
 .cfg-advanced { margin-top: 8px; }
 .modal-card.narrow { max-width: 420px; }
+.ai-modal-card { width: min(480px, 100%); }
+
+.modal-form {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+}
+
+.modal-form .cfg-grid {
+  gap: 12px;
+}
+
+.modal-lead {
+  margin: 0;
+  line-height: 1.45;
+}
+
 .ai-usage {
-  margin-top: 12px;
+  margin: 0;
   padding: 10px 12px;
   border: 1px dashed var(--line);
   border-radius: 9px;
@@ -623,6 +642,129 @@ textarea.field {
 
 .doc-row:last-child { border-bottom: none; }
 .doc-row.unavailable { opacity: 0.45; }
+
+.docs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.docs-source-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.docs-source-select {
+  flex: 1;
+  min-width: 140px;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.doc-source-badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.doc-source-badge.ai {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.doc-source-badge.system {
+  color: var(--muted);
+}
+
+.ai-usage-history {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.ai-usage-history h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ai-usage-table-wrap {
+  overflow: auto;
+  max-height: 160px;
+}
+
+.ai-usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.ai-usage-table th,
+.ai-usage-table td {
+  text-align: left;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.ai-usage-table th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.ai-gen-status {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+}
+
+.ai-gen-status.error {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 25%, var(--line));
+}
+
+.btn-progress {
+  position: relative;
+  overflow: hidden;
+  min-width: 148px;
+}
+
+.btn-progress .btn-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: width 0.25s ease;
+  pointer-events: none;
+}
+
+.btn-progress .btn-progress-label {
+  position: relative;
+  z-index: 1;
+}
+
+.btn-progress.is-running {
+  cursor: wait;
+}
+
+.btn-progress.is-running .btn-progress-label {
+  opacity: 0.92;
+}
+
 .docs-zip { margin-top: 12px; display: grid; gap: 8px; }
 .docs-danger {
   margin-top: 14px;

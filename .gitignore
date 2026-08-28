@@ -3,7 +3,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Exploration runtime output
+# Exploration runtime output (includes application-context/ai/ BYOK docs)
 .memory/
 application-context/
 data/

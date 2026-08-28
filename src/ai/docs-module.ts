@@ -1,10 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ApplicationContext } from "../models/index.js";
-import {
-  generateDocumentation,
-  type DocumentationMeta,
-} from "../documentation/index.js";
+import type { DocumentationMeta } from "../documentation/index.js";
 import { chatCompletion } from "./chat.js";
 import {
   addUsage,
@@ -23,18 +20,37 @@ const DOC_FILES = [
   "AGENTS.md",
 ] as const;
 
+export interface AiDocManifest {
+  provider: string;
+  model: string;
+  generatedAt: string;
+  files: string[];
+}
+
+export interface GenerateAiDocumentationProgress {
+  current: number;
+  total: number;
+  file: string;
+  phase: "read" | "generate" | "write";
+}
+
 export interface GenerateAiDocumentationInput {
   context: ApplicationContext;
-  outputDir: string;
+  /** System docs directory (application-context/). */
+  systemDir: string;
+  /** AI markdown output directory (application-context/ai/). */
+  aiDir: string;
   meta?: DocumentationMeta;
   modules: AiModuleId[];
   chat: Omit<AiChatRequest, "messages">;
+  onProgress?: (progress: GenerateAiDocumentationProgress) => void;
 }
 
 export interface GenerateAiDocumentationResult {
   files: string[];
   usage: AiTokenUsage;
   usedAi: boolean;
+  manifest?: AiDocManifest;
   fallbackToSystem?: boolean;
   error?: string;
 }
@@ -73,16 +89,15 @@ async function polishFile(
 }
 
 /**
- * Always writes system docs first (including application.json), then optionally
- * polishes markdown files via the LLM when the docs module is enabled.
+ * Reads system-generated markdown from `systemDir`, polishes via LLM, and writes
+ * results to `aiDir` without modifying system files. Re-running overwrites prior AI files.
  */
 export async function generateAiDocumentation(
   input: GenerateAiDocumentationInput,
 ): Promise<GenerateAiDocumentationResult> {
-  const systemFiles = await generateDocumentation(input.context, input.outputDir, input.meta);
   const wantsDocs = input.modules.includes("docs");
   if (!wantsDocs) {
-    return { files: systemFiles, usage: emptyUsage(), usedAi: false };
+    return { files: [], usage: emptyUsage(), usedAi: false };
   }
 
   let usage = emptyUsage({
@@ -97,29 +112,59 @@ export async function generateAiDocumentation(
     `Flows: ${input.context.flows.length}`,
   ].join("\n");
 
+  const total = DOC_FILES.length;
+  const written: string[] = [];
+
   try {
-    await mkdir(input.outputDir, { recursive: true });
-    for (const name of DOC_FILES) {
-      const abs = path.join(input.outputDir, name);
+    await mkdir(input.aiDir, { recursive: true });
+
+    for (let i = 0; i < DOC_FILES.length; i++) {
+      const name = DOC_FILES[i]!;
+      const step = i + 1;
+      input.onProgress?.({ current: step, total, file: name, phase: "read" });
+
+      const systemPath = path.join(input.systemDir, name);
       let current = "";
       try {
-        current = await readFile(abs, "utf8");
+        current = await readFile(systemPath, "utf8");
       } catch {
         continue;
       }
       if (!current.trim()) continue;
+
+      input.onProgress?.({ current: step, total, file: name, phase: "generate" });
       const polished = await polishFile(input.chat, name, current, contextSummary);
       if (!polished.text.trim()) {
         throw new Error(`AI returned empty content for ${name}`);
       }
-      await writeFile(abs, polished.text.endsWith("\n") ? polished.text : `${polished.text}\n`, "utf8");
+
+      input.onProgress?.({ current: step, total, file: name, phase: "write" });
+      const aiPath = path.join(input.aiDir, name);
+      await writeFile(
+        aiPath,
+        polished.text.endsWith("\n") ? polished.text : `${polished.text}\n`,
+        "utf8",
+      );
+      written.push(aiPath);
       usage = addUsage(usage, polished.usage);
     }
-    return { files: systemFiles, usage, usedAi: true };
+
+    if (written.length === 0) {
+      throw new Error("No system markdown files found to polish. Run exploration first.");
+    }
+
+    const manifest: AiDocManifest = {
+      provider: input.chat.provider,
+      model: input.chat.model,
+      generatedAt: new Date().toISOString(),
+      files: written.map((f) => path.basename(f)),
+    };
+    await writeFile(path.join(input.aiDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+    return { files: written, usage, usedAi: true, manifest };
   } catch (err) {
-    // Keep system docs; surface error to caller
     return {
-      files: systemFiles,
+      files: written,
       usage,
       usedAi: false,
       fallbackToSystem: true,

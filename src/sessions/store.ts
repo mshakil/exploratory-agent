@@ -21,6 +21,9 @@ import {
   type ListSessionsFilter,
   type RunStatistics,
 } from "./types.js";
+import type { AiDocManifest } from "../ai/docs-module.js";
+
+export type DocVariant = "system" | "ai";
 
 function contextRelpath(sessionId: string): string {
   return path.posix.join("sessions", sessionId, "application-context");
@@ -84,6 +87,9 @@ function sessionFromRow(row: SessionRow, dataRoot: string): ExplorationSession {
     aiUsage: row.aiUsage
       ? (row.aiUsage as ExplorationSession["aiUsage"])
       : undefined,
+    aiUsageHistory: Array.isArray(row.aiUsageHistory)
+      ? (row.aiUsageHistory as ExplorationSession["aiUsageHistory"])
+      : undefined,
   };
 
   return ExplorationSessionSchema.parse(raw);
@@ -135,6 +141,10 @@ export class SessionStore {
 
   contextDir(sessionId: string): string {
     return path.join(this.sessionDir(sessionId), "application-context");
+  }
+
+  aiContextDir(sessionId: string): string {
+    return path.join(this.contextDir(sessionId), "ai");
   }
 
   memoryDir(sessionId: string): string {
@@ -189,6 +199,7 @@ export class SessionStore {
       docGenerationMode: parsed.docGenerationMode ?? null,
       aiModules: parsed.aiModules ?? [],
       aiUsage: parsed.aiUsage ?? null,
+      aiUsageHistory: parsed.aiUsageHistory ?? [],
     };
 
     await this.db
@@ -225,6 +236,7 @@ export class SessionStore {
           docGenerationMode: values.docGenerationMode,
           aiModules: values.aiModules,
           aiUsage: values.aiUsage,
+          aiUsageHistory: values.aiUsageHistory,
         },
       });
   }
@@ -392,35 +404,66 @@ export class SessionStore {
     }
   }
 
-  async documentExists(sessionId: string, name: string): Promise<boolean> {
+  private resolveDocumentPath(sessionId: string, name: string, variant: DocVariant = "system"): string {
+    const isShared =
+      name === "application.json" || name.startsWith("framework/") || name.startsWith("changes/");
+    if (variant === "ai" && !isShared) {
+      return path.join(this.aiContextDir(sessionId), ...name.split("/"));
+    }
+    return path.join(this.contextDir(sessionId), ...name.split("/"));
+  }
+
+  async documentExists(
+    sessionId: string,
+    name: string,
+    variant: DocVariant = "system",
+  ): Promise<boolean> {
     try {
-      await access(path.join(this.contextDir(sessionId), name));
+      await access(this.resolveDocumentPath(sessionId, name, variant));
       return true;
     } catch {
-      try {
-        await access(path.join(this.contextDir(sessionId), ...name.split("/")));
-        return true;
-      } catch {
-        return false;
-      }
+      return false;
     }
   }
 
-  async readDocument(sessionId: string, name: string): Promise<string | null> {
+  async readDocument(
+    sessionId: string,
+    name: string,
+    variant: DocVariant = "system",
+  ): Promise<string | null> {
     try {
-      return await readFile(path.join(this.contextDir(sessionId), ...name.split("/")), "utf8");
+      return await readFile(this.resolveDocumentPath(sessionId, name, variant), "utf8");
     } catch {
       return null;
     }
   }
 
-  async documentSize(sessionId: string, name: string): Promise<number | null> {
+  async documentSize(
+    sessionId: string,
+    name: string,
+    variant: DocVariant = "system",
+  ): Promise<number | null> {
     try {
-      const s = await stat(path.join(this.contextDir(sessionId), ...name.split("/")));
+      const s = await stat(this.resolveDocumentPath(sessionId, name, variant));
       return s.size;
     } catch {
       return null;
     }
+  }
+
+  async readAiManifest(sessionId: string): Promise<AiDocManifest | null> {
+    const raw = await this.readDocument(sessionId, "manifest.json", "ai");
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as AiDocManifest;
+    } catch {
+      return null;
+    }
+  }
+
+  async aiDocsAvailable(sessionId: string): Promise<boolean> {
+    const manifest = await this.readAiManifest(sessionId);
+    return manifest != null && manifest.files.length > 0;
   }
 
   async listChangeReports(sessionId: string): Promise<string[]> {
@@ -443,8 +486,8 @@ export class SessionStore {
     }
   }
 
-  documentPath(sessionId: string, name: string): string {
-    return path.join(this.contextDir(sessionId), ...name.split("/"));
+  documentPath(sessionId: string, name: string, variant: DocVariant = "system"): string {
+    return this.resolveDocumentPath(sessionId, name, variant);
   }
 
   async clearContext(sessionId: string): Promise<number> {

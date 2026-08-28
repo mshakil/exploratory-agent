@@ -113,6 +113,21 @@ export const ExplorationSessionSchema = z.object({
       model: z.string().optional(),
     })
     .optional(),
+  /** Historical AI usage for comparing providers/models across runs. */
+  aiUsageHistory: z
+    .array(
+      z.object({
+        at: z.string(),
+        module: z.string().optional(),
+        provider: z.string().optional(),
+        model: z.string().optional(),
+        promptTokens: z.number(),
+        completionTokens: z.number(),
+        totalTokens: z.number(),
+        estimatedCostUsd: z.number().optional(),
+      }),
+    )
+    .optional(),
 });
 export type ExplorationSession = z.infer<typeof ExplorationSessionSchema>;
 

@@ -11,7 +11,7 @@ import {
   type StabilityProfile,
   type AuthMode,
 } from "../models/index.js";
-import { createSessionId, deriveApplicationName, SessionStore } from "./store.js";
+import { createSessionId, deriveApplicationName, SessionStore, type DocVariant } from "./store.js";
 import type {
   CreateSessionInput,
   ExplorationEvent,
@@ -569,29 +569,69 @@ export class SessionManager {
     this.bus.emit("session", session);
   }
 
-  async listDocuments(sessionId: string): Promise<
-    Array<{
+  async listDocuments(
+    sessionId: string,
+    variant: DocVariant = "system",
+  ): Promise<{
+    variant: DocVariant;
+    variants: {
+      system: { available: boolean };
+      ai: {
+        available: boolean;
+        provider?: string;
+        model?: string;
+        generatedAt?: string;
+      };
+    };
+    documents: Array<{
       name: string;
       label: string;
       kind: "markdown" | "json";
       description?: string;
       available: boolean;
       size?: number;
-    }>
-  > {
+      source: DocVariant;
+    }>;
+  }> {
     const session = await this.getSession(sessionId);
+    const store = this.store;
+    const systemAvailable = await store.documentExists(sessionId, "application.json", "system");
+    const aiManifest = await store.readAiManifest(sessionId);
+    const aiAvailable = aiManifest != null && aiManifest.files.length > 0;
+
+    const variants = {
+      system: { available: systemAvailable },
+      ai: {
+        available: aiAvailable,
+        provider: aiManifest?.provider,
+        model: aiManifest?.model,
+        generatedAt: aiManifest?.generatedAt,
+      },
+    };
+
     const docs = [];
     for (const doc of CONTEXT_DOCUMENTS) {
-      const available = await this.store.documentExists(sessionId, doc.name);
-      const size = available ? (await this.store.documentSize(sessionId, doc.name)) ?? undefined : undefined;
-      docs.push({ ...doc, available, size });
+      const isJson = doc.kind === "json";
+      const useVariant: DocVariant =
+        variant === "ai" && !isJson ? "ai" : "system";
+      const available = await store.documentExists(sessionId, doc.name, useVariant);
+      const size = available
+        ? (await store.documentSize(sessionId, doc.name, useVariant)) ?? undefined
+        : undefined;
+      docs.push({
+        ...doc,
+        available,
+        size,
+        source: useVariant,
+      });
     }
 
-    // Framework-specific doc
     if (session && session.framework !== "independent") {
       const name = `framework/${frameworkFileName(session.framework)}`;
-      const available = await this.store.documentExists(sessionId, name);
-      const size = available ? (await this.store.documentSize(sessionId, name)) ?? undefined : undefined;
+      const available = await store.documentExists(sessionId, name, "system");
+      const size = available
+        ? (await store.documentSize(sessionId, name, "system")) ?? undefined
+        : undefined;
       docs.push({
         name,
         label: FRAMEWORK_LABELS[session.framework],
@@ -599,13 +639,13 @@ export class SessionManager {
         description: `${FRAMEWORK_LABELS[session.framework]} selector mappings`,
         available,
         size,
+        source: "system" as const,
       });
     }
 
-    // Change reports
-    const changes = await this.store.listChangeReports(sessionId);
+    const changes = await store.listChangeReports(sessionId);
     for (const name of changes) {
-      const size = (await this.store.documentSize(sessionId, name)) ?? undefined;
+      const size = (await store.documentSize(sessionId, name, "system")) ?? undefined;
       docs.push({
         name,
         label: path.basename(name),
@@ -613,10 +653,11 @@ export class SessionManager {
         description: "Exploration change report",
         available: true,
         size,
+        source: "system" as const,
       });
     }
 
-    return docs;
+    return { variant, variants, documents: docs };
   }
 
   async removeContext(sessionId: string): Promise<{ removed: number }> {

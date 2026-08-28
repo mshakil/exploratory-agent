@@ -24,9 +24,12 @@ export {
 export { chatCompletion } from "./chat.js";
 export {
   generateAiDocumentation,
+  type AiDocManifest,
   type GenerateAiDocumentationInput,
+  type GenerateAiDocumentationProgress,
   type GenerateAiDocumentationResult,
 } from "./docs-module.js";
+export { listProviderModels, type ListModelsInput } from "./list-models.js";
 
 export interface AiAssistant {
   nameFlow?(steps: string[]): Promise<string | null>;

@@ -27,7 +27,10 @@ const state = {
   sessions: /** @type {ExplorationSession[]} */ ([]),
   selectedId: /** @type {string | null} */ (null),
   events: /** @type {ExplorationEvent[]} */ ([]),
-  documents: /** @type {Array<{name:string;label:string;kind:string;description?:string;available:boolean;size?:number}>} */ ([]),
+  documents: /** @type {Array<{name:string;label:string;kind:string;description?:string;available:boolean;size?:number;source?:string}>} */ ([]),
+  docVariant: /** @type {"system" | "ai"} */ ("system"),
+  docVariants: /** @type {{ system?: { available: boolean }; ai?: { available: boolean; provider?: string; model?: string; generatedAt?: string } } | null} */ (null),
+  aiDocsGenerating: false,
   sse: /** @type {EventSource | null} */ (null),
   pauseRequested: false,
   /** @type {{ id: string; username: string; role: string } | null} */
@@ -88,6 +91,11 @@ const els = {
   detailsKv: /** @type {HTMLElement} */ ($("details-kv")),
   docList: /** @type {HTMLElement} */ ($("doc-list")),
   docsEmpty: /** @type {HTMLElement} */ ($("docs-empty")),
+  docVariant: /** @type {HTMLSelectElement} */ ($("doc-variant")),
+  docSourceBadge: /** @type {HTMLElement} */ ($("doc-source-badge")),
+  aiUsageHistory: /** @type {HTMLElement} */ ($("ai-usage-history")),
+  aiUsageTbody: /** @type {HTMLElement} */ ($("ai-usage-tbody")),
+  aiGenStatus: /** @type {HTMLElement} */ ($("ai-gen-status")),
   btnDownloadZip: /** @type {HTMLButtonElement} */ ($("btn-download-zip")),
   btnRemoveContext: /** @type {HTMLButtonElement} */ ($("btn-remove-context")),
   btnDeleteSession: /** @type {HTMLButtonElement} */ ($("btn-delete-session")),
@@ -99,6 +107,8 @@ const els = {
   btnDocs: /** @type {HTMLButtonElement} */ ($("btn-docs")),
   btnResumeCtx: /** @type {HTMLButtonElement} */ ($("btn-resume-ctx")),
   btnAiDocs: /** @type {HTMLButtonElement} */ ($("btn-ai-docs")),
+  btnAiDocsFill: /** @type {HTMLElement} */ ($("btn-ai-docs-fill")),
+  btnAiDocsLabel: /** @type {HTMLElement} */ ($("btn-ai-docs-label")),
   btnTheme: /** @type {HTMLButtonElement} */ ($("btn-theme")),
   docModal: /** @type {HTMLElement} */ ($("doc-modal")),
   docModalTitle: /** @type {HTMLElement} */ ($("doc-modal-title")),
@@ -111,10 +121,10 @@ const els = {
   resumeConfirm: /** @type {HTMLButtonElement} */ ($("resume-confirm")),
   aiModal: /** @type {HTMLElement} */ ($("ai-modal")),
   aiProvider: /** @type {HTMLSelectElement} */ ($("ai-provider")),
-  aiModel: /** @type {HTMLInputElement} */ ($("ai-model")),
+  aiModel: /** @type {HTMLSelectElement} */ ($("ai-model")),
+  aiModelHint: /** @type {HTMLElement} */ ($("ai-model-hint")),
   aiApiKey: /** @type {HTMLInputElement} */ ($("ai-api-key")),
   aiAzureEndpoint: /** @type {HTMLInputElement} */ ($("ai-azure-endpoint")),
-  aiAzureDeployment: /** @type {HTMLInputElement} */ ($("ai-azure-deployment")),
   aiUsagePreview: /** @type {HTMLElement} */ ($("ai-usage-preview")),
   aiCancel: /** @type {HTMLButtonElement} */ ($("ai-cancel")),
   aiSave: /** @type {HTMLButtonElement} */ ($("ai-save")),
@@ -322,6 +332,10 @@ function readConfig(key) {
 }
 
 const AI_STORAGE_KEY = "ae.ai.byok";
+/** @type {Array<{ id: string; label: string; needsAzureEndpoint?: boolean }>} */
+let aiProviderCatalog = [];
+let aiModelsRequestId = 0;
+let aiModelsDebounce = /** @type {ReturnType<typeof setTimeout> | null} */ (null);
 
 function loadAiConfig() {
   try {
@@ -340,20 +354,130 @@ function syncAiAzureUi() {
   document.querySelectorAll(".ai-azure-wrap").forEach((el) => el.classList.toggle("hidden", !azure));
 }
 
-function openAiModal() {
+function setAiModelHint(text, isError = false) {
+  if (!text) {
+    els.aiModelHint.textContent = "";
+    els.aiModelHint.classList.add("hidden");
+    els.aiModelHint.style.color = "";
+    return;
+  }
+  els.aiModelHint.textContent = text;
+  els.aiModelHint.classList.remove("hidden");
+  els.aiModelHint.style.color = isError ? "var(--danger, #c0392b)" : "";
+}
+
+function populateAiModelSelect(models, preferred) {
+  els.aiModel.innerHTML = "";
+  if (!models.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No models available";
+    els.aiModel.appendChild(opt);
+    els.aiModel.disabled = true;
+    return;
+  }
+  for (const id of models) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    els.aiModel.appendChild(opt);
+  }
+  els.aiModel.disabled = false;
+  if (preferred && models.includes(preferred)) {
+    els.aiModel.value = preferred;
+  }
+}
+
+async function ensureAiProviders() {
+  if (aiProviderCatalog.length) return aiProviderCatalog;
+  const data = await api("/api/ai/providers");
+  aiProviderCatalog = data.providers || [];
+  els.aiProvider.innerHTML = "";
+  for (const p of aiProviderCatalog) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.label;
+    els.aiProvider.appendChild(opt);
+  }
+  return aiProviderCatalog;
+}
+
+async function fetchAiModels(preferred) {
+  const apiKey = els.aiApiKey.value.trim();
+  const provider = els.aiProvider.value;
+  if (!apiKey) {
+    populateAiModelSelect([], "");
+    els.aiModel.innerHTML = '<option value="">Enter API key to load models…</option>';
+    els.aiModel.disabled = true;
+    setAiModelHint("");
+    return;
+  }
+  if (provider === "azure-openai" && !els.aiAzureEndpoint.value.trim()) {
+    populateAiModelSelect([], "");
+    els.aiModel.innerHTML = '<option value="">Enter Azure endpoint to load deployments…</option>';
+    els.aiModel.disabled = true;
+    setAiModelHint("");
+    return;
+  }
+
+  const requestId = ++aiModelsRequestId;
+  els.aiModel.disabled = true;
+  els.aiModel.innerHTML = '<option value="">Loading models…</option>';
+  setAiModelHint("Fetching models from provider…");
+
+  try {
+    const body = { provider };
+    if (provider === "azure-openai") {
+      body.azureEndpoint = els.aiAzureEndpoint.value.trim();
+    }
+    const data = await api("/api/ai/models", {
+      method: "POST",
+      headers: { "x-api-key": apiKey },
+      body: JSON.stringify(body),
+    });
+    if (requestId !== aiModelsRequestId) return;
+    const models = /** @type {string[]} */ (data.models || []);
+    populateAiModelSelect(models, preferred || loadAiConfig().model);
+    setAiModelHint(
+      models.length
+        ? `${models.length} model${models.length === 1 ? "" : "s"} loaded from ${provider}.`
+        : "No chat models returned for this key.",
+    );
+  } catch (err) {
+    if (requestId !== aiModelsRequestId) return;
+    els.aiModel.innerHTML = '<option value="">Could not load models</option>';
+    els.aiModel.disabled = true;
+    setAiModelHint(err instanceof Error ? err.message : String(err), true);
+  }
+}
+
+function scheduleAiModelsFetch(preferred) {
+  if (aiModelsDebounce) clearTimeout(aiModelsDebounce);
+  aiModelsDebounce = setTimeout(() => {
+    aiModelsDebounce = null;
+    void fetchAiModels(preferred);
+  }, 400);
+}
+
+async function openAiModal() {
   const cfg = loadAiConfig();
-  els.aiProvider.value = cfg.provider || "openai";
-  els.aiModel.value = cfg.model || (cfg.provider === "anthropic" ? "claude-3-5-haiku-latest" : "gpt-4o-mini");
+  try {
+    await ensureAiProviders();
+  } catch (err) {
+    alert(err instanceof Error ? err.message : String(err));
+    return;
+  }
+  els.aiProvider.value = cfg.provider || aiProviderCatalog[0]?.id || "openai";
   els.aiApiKey.value = cfg.apiKey || "";
   els.aiAzureEndpoint.value = cfg.azureEndpoint || "";
-  els.aiAzureDeployment.value = cfg.azureDeployment || "";
+  syncAiAzureUi();
   if (cfg.lastUsage) {
     els.aiUsagePreview.textContent = formatAiUsage(cfg.lastUsage);
   } else {
     els.aiUsagePreview.textContent = "Tokens and estimated cost appear after generation.";
   }
-  syncAiAzureUi();
   els.aiModal.classList.remove("hidden");
+  await fetchAiModels(cfg.model);
 }
 
 function formatAiUsage(usage) {
@@ -363,7 +487,109 @@ function formatAiUsage(usage) {
   const cost = usage.estimatedCostUsd;
   const costText =
     typeof cost === "number" ? ` · ~$${cost.toFixed(4)} USD (estimate only)` : "";
-  return `Tokens: ${prompt} prompt + ${completion} completion = ${total} total${costText}`;
+  const who = [usage.provider, usage.model].filter(Boolean).join(" / ");
+  const whoText = who ? `${who}: ` : "";
+  return `${whoText}${total.toLocaleString()} tokens (${prompt.toLocaleString()} in / ${completion.toLocaleString()} out)${costText}`;
+}
+
+function formatShortWhen(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function setAiDocsProgress(current, total, file) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  els.btnAiDocsFill.style.width = `${pct}%`;
+  const phase = file ? ` — ${file}` : "";
+  els.btnAiDocsLabel.textContent = total > 0 ? `Generating ${pct}%${phase}` : "Generate AI docs";
+}
+
+function resetAiDocsButton() {
+  state.aiDocsGenerating = false;
+  els.btnAiDocs.disabled = false;
+  els.btnAiDocs.classList.remove("is-running");
+  els.btnAiDocsFill.style.width = "0%";
+  els.btnAiDocsLabel.textContent = "Generate AI docs";
+}
+
+function showAiGenStatus(message, isError = false) {
+  if (!message) {
+    els.aiGenStatus.classList.add("hidden");
+    els.aiGenStatus.textContent = "";
+    els.aiGenStatus.classList.remove("error");
+    return;
+  }
+  els.aiGenStatus.textContent = message;
+  els.aiGenStatus.classList.toggle("error", isError);
+  els.aiGenStatus.classList.remove("hidden");
+}
+
+function renderAiUsageHistory(session) {
+  const history = session?.aiUsageHistory || [];
+  if (!history.length) {
+    els.aiUsageHistory.classList.add("hidden");
+    els.aiUsageTbody.innerHTML = "";
+    return;
+  }
+  els.aiUsageHistory.classList.remove("hidden");
+  els.aiUsageTbody.innerHTML = history
+    .slice()
+    .reverse()
+    .map((row) => {
+      const cost =
+        typeof row.estimatedCostUsd === "number"
+          ? `$${row.estimatedCostUsd.toFixed(4)}`
+          : "—";
+      return `<tr>
+        <td>${escapeHtml(formatShortWhen(row.at))}</td>
+        <td>${escapeHtml(row.provider || "—")}</td>
+        <td>${escapeHtml(row.model || "—")}</td>
+        <td>${escapeHtml(String(row.totalTokens ?? 0))}</td>
+        <td>${escapeHtml(cost)}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function syncDocVariantUi(session) {
+  const variants = state.docVariants;
+  const aiReady = variants?.ai?.available === true;
+  if (state.docVariant === "ai" && !aiReady) {
+    state.docVariant = "system";
+  }
+  const aiOption = els.docVariant.querySelector('option[value="ai"]');
+  if (aiOption) {
+    aiOption.disabled = !aiReady;
+    aiOption.textContent = aiReady
+      ? `AI (${variants?.ai?.provider || "provider"} / ${variants?.ai?.model || "model"})`
+      : "AI generated (not yet)";
+  }
+  els.docVariant.value = state.docVariant;
+  const badge = els.docSourceBadge;
+  if (state.docVariant === "ai" && aiReady) {
+    badge.textContent = "AI";
+    badge.className = "doc-source-badge ai";
+    badge.classList.remove("hidden");
+  } else {
+    badge.textContent = "System";
+    badge.className = "doc-source-badge system";
+    badge.classList.remove("hidden");
+  }
+  renderAiUsageHistory(session);
+}
+
+function documentsUrl(sessionId, variant = state.docVariant) {
+  const q = variant ? `?variant=${encodeURIComponent(variant)}` : "";
+  return `/api/sessions/${encodeURIComponent(sessionId)}/documents${q}`;
 }
 
 function showShell() {
@@ -562,7 +788,9 @@ function renderDocs(documents, session = selectedSession()) {
   els.btnDownloadZip.disabled = available.length === 0;
   els.btnRemoveContext.disabled = available.length === 0 || live;
   els.btnDeleteSession.disabled = !session || live;
+  syncDocVariantUi(session);
   els.docList.innerHTML = "";
+  const variantQ = `variant=${encodeURIComponent(state.docVariant)}`;
   for (const doc of documents) {
     const row = document.createElement("div");
     row.className = `doc-row${doc.available ? "" : " unavailable"}`;
@@ -574,11 +802,11 @@ function renderDocs(documents, session = selectedSession()) {
       view.type = "button";
       view.className = "linkish";
       view.textContent = "View";
-      view.addEventListener("click", () => openDocument(state.selectedId, doc.name));
+      view.addEventListener("click", () => openDocument(state.selectedId, doc.name, state.docVariant));
       const dl = document.createElement("a");
       dl.className = "linkish";
       dl.textContent = "Download";
-      dl.href = `/api/sessions/${encodeURIComponent(state.selectedId)}/documents/${encodeURIComponent(doc.name)}?download=1`;
+      dl.href = `/api/sessions/${encodeURIComponent(state.selectedId)}/documents/${encodeURIComponent(doc.name)}?download=1&${variantQ}`;
       dl.download = doc.name.split("/").pop() || doc.name;
       actions.append(view, document.createTextNode(" · "), dl);
     } else {
@@ -646,6 +874,7 @@ function renderMain(session) {
     "hidden",
     live || !(session.status === "completed" || session.status === "paused" || session.status === "failed"),
   );
+  els.btnAiDocs.disabled = state.aiDocsGenerating;
   const resumeHint =
     "Continues from saved memory and looks for new areas; compares against previous docs.";
   els.btnResumeRun.title = resumeHint;
@@ -757,8 +986,9 @@ function connectSse(sessionId) {
 
 async function refreshDocuments(sessionId) {
   try {
-    const data = await api(`/api/sessions/${encodeURIComponent(sessionId)}/documents`);
+    const data = await api(documentsUrl(sessionId, state.docVariant));
     state.documents = data.documents || [];
+    state.docVariants = data.variants || null;
     if (sessionId === state.selectedId) renderDocs(state.documents, selectedSession());
   } catch {
     /* ignore */
@@ -770,14 +1000,15 @@ async function selectSession(sessionId) {
   closeSheets();
   renderSessionList();
   try {
-    const [{ session }, { events }, { documents }] = await Promise.all([
+    const [{ session }, { events }, docPayload] = await Promise.all([
       api(`/api/sessions/${encodeURIComponent(sessionId)}`),
       api(`/api/sessions/${encodeURIComponent(sessionId)}/events`),
-      api(`/api/sessions/${encodeURIComponent(sessionId)}/documents`),
+      api(documentsUrl(sessionId, state.docVariant)),
     ]);
     upsertSession(session);
     state.events = events || [];
-    state.documents = documents || [];
+    state.documents = docPayload.documents || [];
+    state.docVariants = docPayload.variants || null;
     renderMain(session);
     connectSse(sessionId);
   } catch (err) {
@@ -809,9 +1040,9 @@ async function startExploration(url, configKey, errorEl) {
   }
 }
 
-async function openDocument(sessionId, name) {
+async function openDocument(sessionId, name, variant = state.docVariant) {
   const res = await fetch(
-    `/api/sessions/${encodeURIComponent(sessionId)}/documents/${encodeURIComponent(name)}`,
+    `/api/sessions/${encodeURIComponent(sessionId)}/documents/${encodeURIComponent(name)}?variant=${encodeURIComponent(variant)}`,
   );
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -994,15 +1225,22 @@ function bindEvents() {
   els.btnRetry.addEventListener("click", () => void resume());
 
   els.btnAiDocs.addEventListener("click", () => void generateAiDocs());
-  els.aiProvider.addEventListener("change", syncAiAzureUi);
+  els.aiProvider.addEventListener("change", () => {
+    syncAiAzureUi();
+    scheduleAiModelsFetch(loadAiConfig().model);
+  });
+  els.aiApiKey.addEventListener("input", () => scheduleAiModelsFetch());
+  els.aiAzureEndpoint.addEventListener("input", () => scheduleAiModelsFetch());
   els.aiCancel.addEventListener("click", () => els.aiModal.classList.add("hidden"));
   els.aiSave.addEventListener("click", () => {
+    const provider = els.aiProvider.value;
+    const model = els.aiModel.value.trim();
     const cfg = {
-      provider: els.aiProvider.value,
-      model: els.aiModel.value.trim(),
+      provider,
+      model,
       apiKey: els.aiApiKey.value,
       azureEndpoint: els.aiAzureEndpoint.value.trim(),
-      azureDeployment: els.aiAzureDeployment.value.trim(),
+      azureDeployment: provider === "azure-openai" ? model : "",
       lastUsage: loadAiConfig().lastUsage,
     };
     if (!cfg.apiKey) {
@@ -1010,7 +1248,11 @@ function bindEvents() {
       return;
     }
     if (!cfg.model) {
-      alert("Model is required");
+      alert("Select a model from the list");
+      return;
+    }
+    if (provider === "azure-openai" && !cfg.azureEndpoint) {
+      alert("Azure endpoint is required");
       return;
     }
     saveAiConfig(cfg);
@@ -1024,18 +1266,27 @@ function bindEvents() {
   });
 
   async function generateAiDocs() {
-    if (!state.selectedId) return;
+    if (!state.selectedId || state.aiDocsGenerating) return;
     const cfg = loadAiConfig();
     if (!cfg.apiKey || !cfg.model) {
       openAiModal();
       alert("Configure your AI provider, model, and API key first.");
       return;
     }
+    state.aiDocsGenerating = true;
     els.btnAiDocs.disabled = true;
+    els.btnAiDocs.classList.add("is-running");
+    setAiDocsProgress(0, 6, "");
+    showAiGenStatus("Starting AI documentation generation…");
+
     try {
-      const data = await api("/api/ai/generate-docs", {
+      const res = await fetch("/api/ai/generate-docs", {
         method: "POST",
-        headers: { "x-api-key": cfg.apiKey },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": cfg.apiKey,
+          Accept: "application/x-ndjson",
+        },
         body: JSON.stringify({
           sessionId: state.selectedId,
           provider: cfg.provider || "openai",
@@ -1043,26 +1294,81 @@ function bindEvents() {
           modules: ["docs"],
           azureEndpoint: cfg.azureEndpoint || undefined,
           azureDeployment: cfg.azureDeployment || undefined,
+          stream: true,
         }),
       });
-      if (data.usage) {
-        saveAiConfig({ ...cfg, lastUsage: data.usage });
-        els.aiUsagePreview.textContent = formatAiUsage(data.usage);
-        alert(`AI docs generated.\n${formatAiUsage(data.usage)}`);
-      } else {
-        alert("AI docs generated.");
+
+      if (!res.ok && !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${res.status})`);
       }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("Streaming not supported by browser");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      /** @type {any} */
+      let complete = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const evt = JSON.parse(line);
+          if (evt.type === "progress") {
+            setAiDocsProgress(evt.current ?? 0, evt.total ?? 6, evt.file ?? "");
+            const phase =
+              evt.phase === "generate"
+                ? "Rewriting"
+                : evt.phase === "write"
+                  ? "Saving"
+                  : "Reading";
+            showAiGenStatus(`${phase} ${evt.file || "…"} (${evt.current}/${evt.total})`);
+          } else if (evt.type === "complete") {
+            complete = evt;
+          } else if (evt.type === "error") {
+            throw new Error(evt.error || "AI generation failed");
+          }
+        }
+      }
+
+      if (!complete) throw new Error("AI generation ended without a result");
+
+      if (complete.usage) {
+        saveAiConfig({ ...cfg, lastUsage: complete.usage });
+        els.aiUsagePreview.textContent = formatAiUsage(complete.usage);
+      }
+      if (complete.session) upsertSession(complete.session);
+
+      state.docVariant = "ai";
+      els.docVariant.value = "ai";
+      showAiGenStatus(
+        complete.usage
+          ? `AI docs ready. ${formatAiUsage(complete.usage)}`
+          : "AI docs generated successfully.",
+      );
       await selectSession(state.selectedId);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      showAiGenStatus(err instanceof Error ? err.message : String(err), true);
     } finally {
-      els.btnAiDocs.disabled = false;
+      resetAiDocsButton();
     }
   }
 
+  els.docVariant.addEventListener("change", async () => {
+    state.docVariant = els.docVariant.value === "ai" ? "ai" : "system";
+    if (state.selectedId) await refreshDocuments(state.selectedId);
+  });
+
   els.btnDownloadZip.addEventListener("click", () => {
     if (!state.selectedId || els.btnDownloadZip.disabled) return;
-    window.location.href = `/api/sessions/${encodeURIComponent(state.selectedId)}/documents/download-all`;
+    const variant = state.docVariant === "ai" ? "ai" : "system";
+    window.location.href = `/api/sessions/${encodeURIComponent(state.selectedId)}/documents/download-all?variant=${encodeURIComponent(variant)}`;
   });
 
   els.btnRemoveContext.addEventListener("click", async () => {

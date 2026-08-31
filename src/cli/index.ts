@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import path from "node:path";
 import { loadEnvFile } from "../db/load-env.js";
+import { ensurePlaywrightBrowsersPath } from "../browser/ensure-browsers-path.js";
 import { SessionManager } from "../sessions/manager.js";
 import type { ExplorationSession } from "../sessions/types.js";
 import {
@@ -16,6 +17,7 @@ import { generateDocumentation, buildApplicationContext } from "../documentation
 import { MemoryStore } from "../memory/index.js";
 
 await loadEnvFile();
+ensurePlaywrightBrowsersPath();
 
 const program = new Command();
 

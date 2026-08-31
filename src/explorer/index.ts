@@ -263,13 +263,27 @@ export class Explorer {
         await this.tryLogin(this.options.username, this.options.password);
       }
 
-      await this.exploreFromCurrent({
-        depth: 0,
-        parentId: undefined,
-        deadline: wallClockDeadline,
-      });
+      if (resume) {
+        // Hybrid resume: continue from memory, prefer unfinished + unexecuted actions,
+        // then walk the start URL again for newly appeared areas.
+        await this.drainUnfinishedPages(wallClockDeadline, { continuePass: true });
+        await this.exploreFromCurrent({
+          depth: 0,
+          parentId: undefined,
+          deadline: wallClockDeadline,
+          continuePass: true,
+        });
+        await this.drainUnfinishedPages(wallClockDeadline, { continuePass: true });
+      } else {
+        await this.exploreFromCurrent({
+          depth: 0,
+          parentId: undefined,
+          deadline: wallClockDeadline,
+        });
+        await this.drainUnfinishedPages(wallClockDeadline);
+      }
 
-      // Mark remaining exploring pages complete if no pending safe actions
+      // Mark anything still unfinished after drain passes
       for (const page of this.graph.listPages()) {
         if (page.status === "EXPLORING" || page.status === "DISCOVERED") {
           this.graph.updatePage(page.id, { status: "COMPLETED" });
@@ -393,6 +407,8 @@ export class Explorer {
     parentId?: string;
     reachedBy?: { action: string; element?: string };
     deadline: number;
+    /** When true, re-plan actions on an already-visited fingerprint (resume / drain). */
+    continuePass?: boolean;
   }): Promise<void> {
     const { boundaries } = this.options;
 
@@ -430,8 +446,9 @@ export class Explorer {
     }
 
     const fingerprint = fingerprintState(state);
+    const alreadyVisited = this.visited.has(fingerprint);
 
-    if (this.visited.has(fingerprint)) {
+    if (alreadyVisited && !params.continuePass) {
       this.logger.verbose(`[STATE] Already visited ${fingerprint.slice(0, 8)}`);
       return;
     }
@@ -458,6 +475,9 @@ export class Explorer {
       });
     } else {
       this.graph.updatePage(page.id, { status: "EXPLORING" });
+      if (alreadyVisited && params.continuePass) {
+        this.logger.verbose(`[STATE] Continue pass on ${page.name}`);
+      }
     }
 
     this.visited.add(fingerprint);
@@ -717,14 +737,21 @@ export class Explorer {
           break;
         }
 
-        // Return to parent state when possible
+        // Return to parent state when possible; re-navigate once before giving up
         await this.returnToPage(page, startUrlFallback(this.options));
-        const restored = await this.safeGetState();
-        if (!restored || fingerprintState(restored) !== fingerprint) {
-          this.logger.verbose(
-            `[STATE] Could not restore ${page.name}; stopping further actions on this page`,
-          );
-          break;
+        let restored = await this.safeGetState();
+        let restoreFailed = !restored || fingerprintState(restored) !== fingerprint;
+        if (restoreFailed) {
+          this.logger.verbose(`[STATE] Could not restore ${page.name}; re-navigating`);
+          await this.returnToPage(page, startUrlFallback(this.options));
+          restored = await this.safeGetState();
+          restoreFailed = !restored || fingerprintState(restored) !== fingerprint;
+          if (restoreFailed) {
+            this.logger.verbose(
+              `[STATE] Restore failed twice for ${page.name}; stopping further actions on this page`,
+            );
+            break;
+          }
         }
       } else {
         this.recordAction(plan, page, "EXECUTED", undefined, safety, resultingId);
@@ -848,26 +875,59 @@ export class Explorer {
     pageId: string,
     plan: { type: string; element: Element; value?: string },
   ): boolean {
-    // Navigation-style clicks are globally unique by element name to avoid
-    // re-walking the same links from every page (combinatorial explosion).
-    const isNavClick =
-      plan.type === "click" &&
-      (plan.element.type === "link" ||
-        plan.element.type === "tab" ||
-        plan.element.type === "menu" ||
-        /dashboard|users|reports|settings|home|nav/i.test(plan.element.name));
-
+    // Scope uniqueness per page so the same nav label on different hubs can both run.
     return this.actions.some((a) => {
       if (a.type !== plan.type) return false;
       if ((a.value ?? "") !== (plan.value ?? "")) return false;
       if (!(a.status === "EXECUTED" || a.status === "SKIPPED" || a.status === "FAILED")) {
         return false;
       }
-      if (isNavClick) {
-        return a.elementName === plan.element.name;
-      }
       return a.pageId === pageId && a.elementName === plan.element.name;
     });
+  }
+
+  /**
+   * Second pass: navigate to pages left DISCOVERED/EXPLORING and explore them
+   * before force-completing at end-of-run.
+   */
+  private async drainUnfinishedPages(
+    deadline: number,
+    opts?: { continuePass?: boolean },
+  ): Promise<void> {
+    const maxPasses = 5;
+    for (let pass = 0; pass < maxPasses; pass++) {
+      if (this.options.shouldAbort?.() || Date.now() > deadline) return;
+      if (this.graph.listPages().length >= this.options.boundaries.maxPages) return;
+      if (this.totalActions >= this.maxTotalActions) return;
+
+      const unfinished = this.graph
+        .listPages()
+        .filter((p) => p.status === "DISCOVERED" || p.status === "EXPLORING");
+      if (unfinished.length === 0) return;
+
+      this.logger.log(
+        `[PASS] Draining ${unfinished.length} unfinished page(s) (pass ${pass + 1})`,
+      );
+
+      for (const page of unfinished) {
+        if (this.options.shouldAbort?.() || Date.now() > deadline) return;
+        if (this.graph.listPages().length >= this.options.boundaries.maxPages) return;
+        if (this.totalActions >= this.maxTotalActions) return;
+
+        await this.returnToPage(page, startUrlFallback(this.options));
+        // Allow exploreFromCurrent to run even if this fingerprint was marked visited
+        // during a prior partial pass.
+        this.visited.delete(page.stateFingerprint);
+
+        const depth = this.depthByPage.get(page.id) ?? 0;
+        await this.exploreFromCurrent({
+          depth: Math.min(depth, this.options.boundaries.maxDepth),
+          parentId: page.parentId,
+          deadline,
+          continuePass: opts?.continuePass === true,
+        });
+      }
+    }
   }
 
   private recordAction(

@@ -14,7 +14,7 @@ Optional framework selection adds Playwright or Selenium Java documentation on t
 npm run setup
 ```
 
-This installs dependencies, Playwright Chromium, and builds the CLI.
+This installs dependencies, Playwright Chromium (into a **stable** user cache, not Cursor’s temp sandbox), and builds the CLI.
 
 **PostgreSQL is required** for both the UI and CLI (users, sessions, runs, events). Artifacts stay on disk under `AE_DATA_DIR`.
 
@@ -25,13 +25,31 @@ node scripts/ensure-db.mjs   # create DB if missing
 npm run db:migrate
 ```
 
+### Playwright browsers (stable path)
+
+Cursor / agent sandboxes often set `PLAYWRIGHT_BROWSERS_PATH` under `%TEMP%\cursor-sandbox-cache\…`, which gets wiped — so Chromium appears “missing” again and again.
+
+This project **always** pins browsers to a durable location and launches with an explicit executable path:
+
+| Platform | Default cache |
+|---|---|
+| Windows | `%LOCALAPPDATA%\ms-playwright` |
+| macOS | `~/Library/Caches/ms-playwright` |
+| Linux | `~/.cache/ms-playwright` |
+
+```bash
+npm run prepare:browsers   # install Chromium into the stable cache
+```
+
+Optional override: set `AE_PLAYWRIGHT_BROWSERS_PATH` in `.env`. Do **not** point it at a Temp/sandbox folder. Re-run `prepare:browsers` only after upgrading the `playwright` package.
+
 See [docs/postgres.md](docs/postgres.md) for schema, legacy JSON import, and ops details.
 
 Or step by step without Docker (bring your own Postgres):
 
 ```bash
 npm install
-npx playwright install chromium
+npm run prepare:browsers
 # set DATABASE_URL in .env
 npm run db:migrate
 npm run build
@@ -68,7 +86,9 @@ npx agent-explorer explore \
 - Enter URL, optional target-app credentials, stability profile, and framework (Independent, Playwright, Selenium Java)
 - Watch live discovery (pages, elements, actions, flows, skip reasons, ETA)
 - Pause / resume / stop; delete session or remove generated context
-- Download `CONTEXT.md`, individual docs, or a full zip
+- Download `CONTEXT.md`, individual docs, or a full zip (system or AI source)
+- **Generate AI docs** — polish system markdown with BYOK; progress bar + streaming status
+- Switch **Docs source** (System vs AI) and compare token usage across providers/models
 - Resume a completed session to re-explore and review change reports
 - Dark / light theme (icon toggle; persisted in the browser)
 
@@ -86,6 +106,7 @@ npm run ui -- --host 0.0.0.0 --port 3847
 | `DATABASE_URL` | **Required.** Postgres connection string |
 | `AE_DATA_DIR` | Artifact root for memory + application-context (default `./data`) |
 | `AE_SESSION_SECRET` | HMAC secret for login cookies (≥16 chars; required in production) |
+| `AE_PLAYWRIGHT_BROWSERS_PATH` | Optional stable Playwright browser cache (overrides Cursor temp sandbox path) |
 | `AE_COOKIE_SECURE=1` | Force `Secure` cookie flag (use behind HTTPS) |
 | `AE_CORS_ORIGIN` | Allowed browser Origin for credentialed CORS (optional) |
 | `AE_CLI_USER_ID` | Optional owner user id for CLI explores (else auto-created `cli` user) |
@@ -131,18 +152,42 @@ Hybrid storage — metadata in Postgres, artifacts on disk:
 data/sessions/<session-id>/
 ├── memory/                 # Crawl snapshot (JSON)
 └── application-context/
-    ├── CONTEXT.md          # Entry point for coding agents
+    ├── CONTEXT.md          # Entry point for coding agents (system-generated)
     ├── AGENTS.md
     ├── application.md
     ├── pages.md
     ├── flows.md
     ├── selectors.md
-    ├── application.json
+    ├── application.json    # Always system-generated (never overwritten by AI)
+    ├── ai/                 # Optional BYOK-polished markdown + manifest.json
     ├── framework/          # Optional framework-specific docs
     └── changes/            # Resume change reports
 ```
 
 Hand `CONTEXT.md` (or the folder) to a coding agent. Metadata (users, sessions, runs, events) lives in PostgreSQL — not in `session.json` / `events.json`.
+
+## Resume
+
+**Resume** continues from saved session memory (visited pages + prior actions), prefers unfinished / new areas, and still writes a change report against the previous `application.json`. If the session used target-app credentials, the UI prompts for the password again (passwords are never stored).
+
+## AI documentation (BYOK)
+
+Documentation defaults to **System** (deterministic templates from `application.json`).
+
+Use **Generate AI docs** in the UI (or set output mode when starting a session) to polish markdown with your own key. Supported providers: **OpenAI**, **Anthropic**, and **Azure OpenAI**. The model dropdown is populated at runtime from each provider’s API — not a hardcoded list.
+
+| Behavior | Detail |
+|---|---|
+| Storage | System files stay in `application-context/`; AI-polished markdown goes to `application-context/ai/` |
+| `application.json` | Always system-generated; never overwritten by AI |
+| Regenerate | Running again with a different model **replaces** prior AI files only |
+| API keys | Sent only for generation requests; **never** stored in Postgres |
+| Progress | Streaming updates + in-button progress bar during generation |
+| Usage history | Token counts and estimated USD cost are saved per session for comparing providers/models |
+
+After `npm pull` / schema changes, run `npm run db:migrate` (migration `0003` adds `ai_usage_history`).
+
+Enrich / explore-hints modules are scaffolded for later.
 
 ## Safety
 

@@ -68,6 +68,10 @@ export const explorationSessions = pgTable(
     exploreSameOriginFrames: boolean("explore_same_origin_frames"),
     dismissConsent: boolean("dismiss_consent"),
     latestChanges: jsonb("latest_changes").$type<Record<string, number> | null>(),
+    docGenerationMode: text("doc_generation_mode"),
+    aiModules: jsonb("ai_modules").$type<string[]>().notNull().default([]),
+    aiUsage: jsonb("ai_usage").$type<Record<string, unknown> | null>(),
+    aiUsageHistory: jsonb("ai_usage_history").$type<unknown[]>().notNull().default([]),
   },
   (t) => ({
     ownerUpdatedIdx: index("exploration_sessions_owner_updated_idx").on(

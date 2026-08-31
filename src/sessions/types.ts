@@ -98,6 +98,36 @@ export const ExplorationSessionSchema = z.object({
   exploreOpenShadow: z.boolean().optional(),
   exploreSameOriginFrames: z.boolean().optional(),
   dismissConsent: z.boolean().optional(),
+  /** Documentation generation preference (system default). */
+  docGenerationMode: z.enum(["system", "ai"]).optional(),
+  /** Enabled AI modules when docGenerationMode is ai. */
+  aiModules: z.array(z.enum(["docs", "enrich", "explore-hints"])).optional(),
+  /** Last AI token usage summary (never contains API keys). */
+  aiUsage: z
+    .object({
+      promptTokens: z.number(),
+      completionTokens: z.number(),
+      totalTokens: z.number(),
+      estimatedCostUsd: z.number().optional(),
+      provider: z.string().optional(),
+      model: z.string().optional(),
+    })
+    .optional(),
+  /** Historical AI usage for comparing providers/models across runs. */
+  aiUsageHistory: z
+    .array(
+      z.object({
+        at: z.string(),
+        module: z.string().optional(),
+        provider: z.string().optional(),
+        model: z.string().optional(),
+        promptTokens: z.number(),
+        completionTokens: z.number(),
+        totalTokens: z.number(),
+        estimatedCostUsd: z.number().optional(),
+      }),
+    )
+    .optional(),
 });
 export type ExplorationSession = z.infer<typeof ExplorationSessionSchema>;
 
@@ -181,6 +211,8 @@ export interface CreateSessionInput {
   exploreOpenShadow?: boolean;
   exploreSameOriginFrames?: boolean;
   dismissConsent?: boolean;
+  docGenerationMode?: "system" | "ai";
+  aiModules?: Array<"docs" | "enrich" | "explore-hints">;
 }
 
 export interface ListSessionsFilter {

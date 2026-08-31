@@ -1,4 +1,9 @@
-import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
+import type { Browser, BrowserContext, Page, Locator } from "playwright";
+import {
+  ensurePlaywrightBrowsersPath,
+  ensurePlaywrightChromiumInstalled,
+  resolveChromiumExecutable,
+} from "./ensure-browsers-path.js";
 import type {
   ActionResult,
   BrowserAdapter,
@@ -40,6 +45,19 @@ function isNavigationRaceError(err: unknown): boolean {
   );
 }
 
+/**
+ * Import playwright only after PLAYWRIGHT_BROWSERS_PATH is pinned.
+ * A static `import "playwright"` freezes Cursor's ephemeral sandbox path into
+ * playwright-core's module-level registryDirectory — so we also pass an explicit
+ * executablePath from the stable cache.
+ */
+async function loadChromium() {
+  ensurePlaywrightBrowsersPath();
+  await ensurePlaywrightChromiumInstalled();
+  const pw = await import("playwright");
+  return pw.chromium;
+}
+
 export class PlaywrightAdapter implements BrowserAdapter {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
@@ -59,8 +77,13 @@ export class PlaywrightAdapter implements BrowserAdapter {
     this.navigationTimeoutMs =
       options?.navigationTimeoutMs ?? Math.max(this.actionTimeoutMs, 60_000);
 
+    const headless = options?.headless ?? true;
+    const chromium = await loadChromium();
+    const executablePath = await resolveChromiumExecutable(headless);
+
     this.browser = await chromium.launch({
-      headless: options?.headless ?? true,
+      headless,
+      executablePath,
     });
     this.context = await this.browser.newContext({
       storageState: options?.storageState,
